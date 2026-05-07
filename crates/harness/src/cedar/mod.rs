@@ -381,7 +381,9 @@ impl Harness for CedarPolicyHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Action, Agent, Control, Decision, Event, Harness, ShellCommand, Started, TrajectoryEvent};
+    use crate::{
+        Action, Agent, Control, Decision, Event, Harness, ShellCommand, Started, TrajectoryEvent,
+    };
     use std::path::PathBuf;
 
     const POLICIES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../policies");

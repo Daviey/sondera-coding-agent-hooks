@@ -51,11 +51,9 @@ async fn main() -> Result<()> {
     let socket_path = args.socket.unwrap_or_else(rpc::default_socket_path);
 
     tracing::info!("Loading policies from {:?}", args.policy_path);
-    let harness = CedarPolicyHarness::from_policy_dir_with_options(
-        args.policy_path,
-        args.deterministic_only,
-    )
-    .await?;
+    let harness =
+        CedarPolicyHarness::from_policy_dir_with_options(args.policy_path, args.deterministic_only)
+            .await?;
 
     tracing::info!("Starting harness server on {:?}", socket_path);
     rpc::serve(harness, &socket_path).await?;
