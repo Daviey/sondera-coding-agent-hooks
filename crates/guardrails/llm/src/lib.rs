@@ -47,7 +47,8 @@ mod schema;
 mod vertex;
 
 use std::env;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -80,6 +81,10 @@ pub enum LlmError {
     /// The request exceeded its timeout.
     #[error("Request timed out")]
     Timeout,
+    /// The circuit breaker is open: the provider has been failing repeatedly and calls are
+    /// fast-failing for the cooldown window instead of each one eating the full retry budget.
+    #[error("circuit breaker open (provider failing); retry later")]
+    CircuitOpen,
     /// The model refused the request.
     #[error("Model refused the request")]
     Refusal,
@@ -317,29 +322,46 @@ impl Default for LlmConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Client (enum dispatch over the backends)
+// Client (enum dispatch over the backends, guarded by a circuit breaker)
 // ---------------------------------------------------------------------------
 
-/// A structured-output LLM client that dispatches to the backend selected by its [`LlmConfig`].
-///
-/// Construction via [`LlmClient::try_new`] validates that required auth is present; callers that
-/// need infallible construction (e.g. loading models at startup before `~/.sondera/env` is
-/// guaranteed) can hold an `Option<LlmClient>` via [`LlmClient::try_new_opt`].
-pub enum LlmClient {
+/// Number of consecutive provider failures that trips the circuit breaker.
+const BREAKER_FAILURE_THRESHOLD: u32 = 5;
+/// How long the breaker stays open before a half-open probe is allowed.
+const BREAKER_COOLDOWN: Duration = Duration::from_secs(30);
+
+/// The backend transport, selected by provider.
+enum LlmBackend {
     Anthropic(AnthropicCompleter),
     OpenAiCompat(OpenAiCompatCompleter),
     Vertex(VertexCompleter),
 }
 
+/// A structured-output LLM client that dispatches to the backend selected by its [`LlmConfig`] and
+/// guards it with a [`CircuitBreaker`] so a provider outage fast-fails instead of every call
+/// paying the full retry cost.
+///
+/// Construction via [`LlmClient::try_new`] validates that required auth is present; callers that
+/// need infallible construction (e.g. loading models at startup before `~/.sondera/env` is
+/// guaranteed) can hold an `Option<LlmClient>` via [`LlmClient::try_new_opt`].
+pub struct LlmClient {
+    backend: LlmBackend,
+    breaker: CircuitBreaker,
+}
+
 impl LlmClient {
     /// Build the backend selected by `config`, failing if required auth is missing.
     pub fn try_new(config: LlmConfig) -> Result<Self, LlmError> {
-        Ok(match config.provider {
-            Provider::Anthropic => Self::Anthropic(AnthropicCompleter::new(config)?),
+        let backend = match config.provider {
+            Provider::Anthropic => LlmBackend::Anthropic(AnthropicCompleter::new(config)?),
             Provider::Openai | Provider::Ollama | Provider::Zai => {
-                Self::OpenAiCompat(OpenAiCompatCompleter::new(config)?)
+                LlmBackend::OpenAiCompat(OpenAiCompatCompleter::new(config)?)
             }
-            Provider::Vertex => Self::Vertex(VertexCompleter::new(config)?),
+            Provider::Vertex => LlmBackend::Vertex(VertexCompleter::new(config)?),
+        };
+        Ok(Self {
+            backend,
+            breaker: CircuitBreaker::new(BREAKER_FAILURE_THRESHOLD, BREAKER_COOLDOWN),
         })
     }
 
@@ -351,19 +373,19 @@ impl LlmClient {
 
     /// The selected provider.
     pub fn provider(&self) -> Provider {
-        match self {
-            Self::Anthropic(c) => c.provider(),
-            Self::OpenAiCompat(c) => c.provider(),
-            Self::Vertex(c) => c.provider(),
+        match &self.backend {
+            LlmBackend::Anthropic(c) => c.provider(),
+            LlmBackend::OpenAiCompat(c) => c.provider(),
+            LlmBackend::Vertex(c) => c.provider(),
         }
     }
 
     /// The configured model id.
     pub fn model(&self) -> &str {
-        match self {
-            Self::Anthropic(c) => c.model(),
-            Self::OpenAiCompat(c) => c.model(),
-            Self::Vertex(c) => c.model(),
+        match &self.backend {
+            LlmBackend::Anthropic(c) => c.model(),
+            LlmBackend::OpenAiCompat(c) => c.model(),
+            LlmBackend::Vertex(c) => c.model(),
         }
     }
 
@@ -372,6 +394,9 @@ impl LlmClient {
     /// Each backend constrains the reply to `schema` using the mechanism its API supports
     /// (Anthropic: schema-validated output; OpenAI-compat: JSON mode + the schema described in
     /// the prompt). The caller is responsible for deserializing the value into a concrete type.
+    ///
+    /// A [`CircuitBreaker`] guards the call: after repeated provider failures it opens and
+    /// returns [`LlmError::CircuitOpen`] immediately for the cooldown window.
     pub async fn complete_json(
         &self,
         system: &str,
@@ -379,11 +404,18 @@ impl LlmClient {
         schema: Value,
         timeout: Duration,
     ) -> Result<Value, LlmError> {
-        match self {
-            Self::Anthropic(c) => c.complete_json(system, user, schema, timeout).await,
-            Self::OpenAiCompat(c) => c.complete_json(system, user, schema, timeout).await,
-            Self::Vertex(c) => c.complete_json(system, user, schema, timeout).await,
+        self.breaker.before_call()?;
+        let result = match &self.backend {
+            LlmBackend::Anthropic(c) => c.complete_json(system, user, schema, timeout).await,
+            LlmBackend::OpenAiCompat(c) => c.complete_json(system, user, schema, timeout).await,
+            LlmBackend::Vertex(c) => c.complete_json(system, user, schema, timeout).await,
+        };
+        match &result {
+            Ok(_) => self.breaker.on_success(),
+            Err(error) if is_provider_failure(error) => self.breaker.on_failure(),
+            _ => {}
         }
+        result
     }
 
     /// Prompt the model and deserialize the structured reply into `T`.
@@ -403,6 +435,82 @@ impl LlmClient {
         let schema = schema_for::<T>();
         let value = self.complete_json(system, user, schema, timeout).await?;
         Ok(serde_json::from_value(value)?)
+    }
+}
+
+/// Whether an error indicates a provider/transport problem worth tripping the breaker on, as
+/// opposed to a per-request content problem (parse failure, refusal, empty content) that should
+/// not block other requests.
+fn is_provider_failure(error: &LlmError) -> bool {
+    match error {
+        LlmError::Timeout
+        | LlmError::Http(_)
+        | LlmError::Auth(_)
+        | LlmError::CircuitOpen => true,
+        LlmError::Api { .. } => true, // 4xx/5xx from the provider counts
+        LlmError::NotConfigured(_)
+        | LlmError::Refusal
+        | LlmError::NoContent
+        | LlmError::Parse(_) => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Circuit breaker
+// ---------------------------------------------------------------------------
+
+/// A simple circuit breaker tracking consecutive provider failures. After `failure_threshold`
+/// failures in a row it opens for `cooldown`; the next call after the cooldown is a half-open
+/// probe that closes the breaker on success or reopens it on failure.
+struct CircuitBreaker {
+    threshold: u32,
+    cooldown: Duration,
+    state: Mutex<BreakerState>,
+}
+
+struct BreakerState {
+    consecutive_failures: u32,
+    opened_at: Option<Instant>,
+}
+
+impl CircuitBreaker {
+    fn new(threshold: u32, cooldown: Duration) -> Self {
+        Self {
+            threshold,
+            cooldown,
+            state: Mutex::new(BreakerState {
+                consecutive_failures: 0,
+                opened_at: None,
+            }),
+        }
+    }
+
+    /// Returns `Err(CircuitOpen)` if the breaker is open and within its cooldown. After the
+    /// cooldown it transitions to half-open and allows the call.
+    fn before_call(&self) -> Result<(), LlmError> {
+        let mut state = self.state.lock().expect("breaker lock poisoned");
+        if let Some(opened_at) = state.opened_at {
+            if opened_at.elapsed() < self.cooldown {
+                return Err(LlmError::CircuitOpen);
+            }
+            // Cooldown elapsed: allow a half-open probe.
+            state.opened_at = None;
+        }
+        Ok(())
+    }
+
+    fn on_success(&self) {
+        let mut state = self.state.lock().expect("breaker lock poisoned");
+        state.consecutive_failures = 0;
+        state.opened_at = None;
+    }
+
+    fn on_failure(&self) {
+        let mut state = self.state.lock().expect("breaker lock poisoned");
+        state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+        if state.consecutive_failures >= self.threshold {
+            state.opened_at = Some(Instant::now());
+        }
     }
 }
 
@@ -570,5 +678,58 @@ mod tests {
         }
         let schema = schema_for::<_S>();
         assert_eq!(schema.get("type").and_then(|v| v.as_str()), Some("object"));
+    }
+
+    #[test]
+    fn circuit_breaker_opens_after_threshold_and_recovers() {
+        let breaker = CircuitBreaker::new(3, Duration::from_millis(50));
+
+        // Below threshold: calls are allowed.
+        assert!(breaker.before_call().is_ok());
+        breaker.on_failure();
+        assert!(breaker.before_call().is_ok());
+        breaker.on_failure();
+        assert!(breaker.before_call().is_ok());
+        // Third consecutive failure trips the breaker.
+        breaker.on_failure();
+        assert!(
+            matches!(breaker.before_call(), Err(LlmError::CircuitOpen)),
+            "breaker should be open after threshold failures"
+        );
+
+        // After the cooldown, a half-open probe is allowed.
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(breaker.before_call().is_ok());
+        // A success closes it.
+        breaker.on_success();
+        assert!(breaker.before_call().is_ok());
+    }
+
+    #[test]
+    fn circuit_breaker_reopens_if_half_open_probe_fails() {
+        let breaker = CircuitBreaker::new(2, Duration::from_millis(40));
+        breaker.on_failure();
+        breaker.on_failure();
+        assert!(matches!(breaker.before_call(), Err(LlmError::CircuitOpen)));
+        std::thread::sleep(Duration::from_millis(50));
+        // Half-open probe allowed...
+        assert!(breaker.before_call().is_ok());
+        // ...but it fails, so the breaker reopens immediately.
+        breaker.on_failure();
+        assert!(matches!(breaker.before_call(), Err(LlmError::CircuitOpen)));
+    }
+
+    #[test]
+    fn is_provider_failure_classifies_errors() {
+        assert!(is_provider_failure(&LlmError::Timeout));
+        assert!(is_provider_failure(&LlmError::Http("x".into())));
+        assert!(is_provider_failure(&LlmError::Auth("x".into())));
+        assert!(is_provider_failure(&LlmError::Api {
+            status: 500,
+            message: "x".into()
+        }));
+        assert!(!is_provider_failure(&LlmError::NoContent));
+        assert!(!is_provider_failure(&LlmError::Parse(serde_json::from_str::<i64>("x").unwrap_err())));
+        assert!(!is_provider_failure(&LlmError::Refusal));
     }
 }
