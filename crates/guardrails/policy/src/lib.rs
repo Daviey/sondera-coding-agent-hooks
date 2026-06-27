@@ -19,6 +19,7 @@ use std::time::Duration;
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
 use tracing::instrument;
+use futures::stream::StreamExt;
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
 
@@ -245,8 +246,9 @@ impl PolicyModel {
 
     /// Evaluate raw content against all configured policy templates.
     ///
-    /// Each policy is evaluated independently. A violation is recorded when
-    /// `violation == 1` in the model's response.
+    /// Policies are evaluated **concurrently** (they are independent), then violations are
+    /// assembled in policy order. A violation is recorded when `violation == 1` in the model's
+    /// response.
     #[instrument(skip(self, content), fields(content_len = content.len()))]
     pub async fn evaluate_content(
         &self,
@@ -261,13 +263,20 @@ impl PolicyModel {
             ));
         }
 
+        // Run each policy's LLM call concurrently with a bounded in-flight cap; `buffered` keeps
+        // results in policy order so violations stay deterministic.
+        const CONCURRENCY: usize = 8;
+        let results: Vec<PolicyModelResult> = futures::stream::iter(self.policies.iter())
+            .map(|policy| self.evaluate_single(policy, content, Duration::from_secs(30)))
+            .buffered(CONCURRENCY)
+            // Surface the first error, matching the original sequential short-circuit.
+            .collect::<Vec<Result<_, _>>>()
+            .await
+            .into_iter()
+            .collect::<Result<_, _>>()?;
+
         let mut violations = Vec::new();
-
-        for policy in &self.policies {
-            let result = self
-                .evaluate_single(policy, content, Duration::from_secs(30))
-                .await?;
-
+        for (policy, result) in self.policies.iter().zip(results.into_iter()) {
             if result.violation == 1 {
                 let code = &result.policy_category;
                 let category_name = policy.category_name(code).unwrap_or_else(|| code.clone());

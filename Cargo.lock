@@ -5427,6 +5427,7 @@ dependencies = [
 name = "sondera-information-flow-control"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -5475,6 +5476,7 @@ name = "sondera-policy"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "futures",
  "schemars 1.2.1",
  "serde",
  "serde_json",

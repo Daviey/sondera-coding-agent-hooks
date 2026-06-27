@@ -16,6 +16,7 @@
 
 mod label;
 
+use futures::stream::StreamExt;
 use sondera_llm::{LlmClient, LlmConfig};
 use std::path::Path;
 use std::time::Duration;
@@ -172,8 +173,8 @@ impl DataModel {
 
     /// Classify content against all configured label templates.
     ///
-    /// Each label is evaluated independently. A finding is recorded when
-    /// `sensitive == 1` in the model's response.
+    /// Labels are evaluated **concurrently** (they are independent), then findings are assembled in
+    /// label order. A finding is recorded when `sensitive == 1` in the model's response.
     #[instrument(skip(self, content), fields(content_len = content.len()))]
     pub async fn classify(
         &self,
@@ -183,13 +184,20 @@ impl DataModel {
             return Err(DataClassificationError::NoLabels);
         }
 
+        // Run each label's LLM call concurrently with a bounded in-flight cap; `buffered` keeps
+        // results in label order so findings stay deterministic.
+        const CONCURRENCY: usize = 8;
+        let results: Vec<SensitivityModelResult> = futures::stream::iter(self.labels.iter())
+            .map(|label| self.classify_single(label, content, Duration::from_secs(30)))
+            .buffered(CONCURRENCY)
+            // Surface the first error, matching the original sequential short-circuit.
+            .collect::<Vec<Result<_, _>>>()
+            .await
+            .into_iter()
+            .collect::<Result<_, _>>()?;
+
         let mut findings = Vec::new();
-
-        for label in &self.labels {
-            let result = self
-                .classify_single(label, content, Duration::from_secs(30))
-                .await?;
-
+        for (label, result) in self.labels.iter().zip(results.into_iter()) {
             if result.sensitive == 1 {
                 let sensitivity_label = result.sensitivity_category;
                 let description = label
