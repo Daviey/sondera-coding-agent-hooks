@@ -149,17 +149,22 @@ jobs:
             -p sondera-opencode \
             -p sondera-harness
 
-      - name: Create archive
+      - name: Stage release artifacts
         run: |
           tar -czvf sondera-${{ matrix.target }}.tar.gz \
             -C target/${{ matrix.target }}/release \
             sondera-claude sondera-copilot sondera-cursor sondera-gemini sondera-opencode-adapter sondera-harness-server
+          # standalone adapter binary for the opencode plugin's install.sh
+          cp target/${{ matrix.target }}/release/sondera-opencode-adapter \
+             sondera-opencode-adapter-${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
-          path: sondera-${{ matrix.target }}.*
+          path: |
+            sondera-${{ matrix.target }}.*
+            sondera-opencode-adapter-${{ matrix.target }}
 
   release-apps:
     name: Create GitHub Release for Apps
@@ -169,12 +174,26 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: binaries-*
           path: dist
           merge-multiple: true
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build plugin bundle
+        working-directory: plugins/opencode
+        run: |
+          bun install
+          bun run sync-bundle
+
+      - name: Stage plugin bundle
+        run: cp plugins/opencode/sondera-bundled.ts dist/
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
@@ -184,3 +203,29 @@ jobs:
           prerelease: ${{ github.ref == 'refs/heads/main' }}
           files: dist/*
           generate_release_notes: true
+
+  publish-npm:
+    name: Publish opencode plugin to npm
+    if: startsWith(github.ref, 'refs/tags/plugin-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup npm
+        uses: actions/setup-node@v4
+        with:
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish
+        working-directory: plugins/opencode
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # prepublishOnly (in package.json) runs sync-bundle to build sondera-bundled.ts first.
+        # Requires the NPM_TOKEN repo secret and a fresh version (the 0.0.x series is taken).
+        run: npm publish --provenance --access public
