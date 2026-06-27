@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tracing::debug;
 
 use crate::schema::harden_schema;
 use crate::{LlmConfig, LlmError, Provider};
@@ -77,49 +76,75 @@ impl AnthropicCompleter {
         });
 
         let url = format!("{}/v1/messages", self.config.effective_base_url());
-        debug!(url = %url, model = %self.config.model, "anthropic request");
-
         let http = &self.http;
         let api_key = &self.api_key;
-        let response = crate::send_with_retry(
-            || {
-                http.post(&url)
-                    .header("x-api-key", api_key)
-                    .header("anthropic-version", ANTHROPIC_VERSION)
-                    .header("content-type", "application/json")
-                    .json(&body)
-            },
-            timeout,
-        )
-        .await?;
+        let started = std::time::Instant::now();
+        let result: Result<(Value, crate::Usage), LlmError> = async {
+            let response = crate::send_with_retry(
+                || {
+                    http.post(&url)
+                        .header("x-api-key", api_key)
+                        .header("anthropic-version", ANTHROPIC_VERSION)
+                        .header("content-type", "application/json")
+                        .json(&body)
+                },
+                timeout,
+            )
+            .await?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().await.unwrap_or_default();
-            let message = serde_json::from_str::<ApiErrorEnvelope>(&text)
-                .map(|e| e.error.message)
-                .unwrap_or(text);
-            return Err(LlmError::Api {
-                status: status.as_u16(),
-                message,
-            });
+            let status = response.status();
+            if !status.is_success() {
+                let text = response.text().await.unwrap_or_default();
+                let message = serde_json::from_str::<ApiErrorEnvelope>(&text)
+                    .map(|e| e.error.message)
+                    .unwrap_or(text);
+                return Err(LlmError::Api {
+                    status: status.as_u16(),
+                    message,
+                });
+            }
+
+            let message: MessagesResponse = response.json().await?;
+            let usage = message.usage.into();
+            if message.stop_reason.as_deref() == Some("refusal") {
+                return Err(LlmError::Refusal);
+            }
+
+            let text = message
+                .content
+                .into_iter()
+                .find_map(|block| match block {
+                    ContentBlock::Text { text } => Some(text),
+                    ContentBlock::Other => None,
+                })
+                .ok_or(LlmError::NoContent)?;
+
+            Ok((crate::parse_lenient_json(&text)?, usage))
         }
-
-        let message: MessagesResponse = response.json().await?;
-        if message.stop_reason.as_deref() == Some("refusal") {
-            return Err(LlmError::Refusal);
+        .await;
+        let elapsed = started.elapsed();
+        match &result {
+            Ok((_, usage)) => tracing::info!(
+                target: "sondera::llm",
+                provider = "anthropic",
+                model = %self.config.model,
+                latency_ms = elapsed.as_millis() as u64,
+                prompt_tokens = usage.prompt_tokens,
+                completion_tokens = usage.completion_tokens,
+                total_tokens = usage.total(),
+                "anthropic completion"
+            ),
+            Err(error) => tracing::warn!(
+                target: "sondera::llm",
+                provider = "anthropic",
+                model = %self.config.model,
+                latency_ms = elapsed.as_millis() as u64,
+                error = %error,
+                "anthropic completion failed"
+            ),
         }
-
-        let text = message
-            .content
-            .into_iter()
-            .find_map(|block| match block {
-                ContentBlock::Text { text } => Some(text),
-                ContentBlock::Other => None,
-            })
-            .ok_or(LlmError::NoContent)?;
-
-        Ok(crate::parse_lenient_json(&text)?)
+        let (value, _usage) = result?;
+        Ok(value)
     }
 }
 
@@ -133,6 +158,25 @@ struct MessagesResponse {
     content: Vec<ContentBlock>,
     #[serde(default)]
     stop_reason: Option<String>,
+    #[serde(default)]
+    usage: AnthropicUsage,
+}
+
+#[derive(Deserialize, Default)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+}
+
+impl From<AnthropicUsage> for crate::Usage {
+    fn from(u: AnthropicUsage) -> Self {
+        crate::Usage {
+            prompt_tokens: u.input_tokens,
+            completion_tokens: u.output_tokens,
+        }
+    }
 }
 
 #[derive(Deserialize)]

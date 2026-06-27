@@ -92,7 +92,31 @@ impl VertexCompleter {
             true, // Vertex (first-party shim and vLLM) supports strict json_schema
         );
         debug!(url = %url, model = %self.config.model, "vertex request");
-        send_and_parse(&self.http, &url, &body, Some(&bearer), timeout).await
+        let started = std::time::Instant::now();
+        let result = send_and_parse(&self.http, &url, &body, Some(&bearer), timeout).await;
+        let elapsed = started.elapsed();
+        match &result {
+            Ok((_, usage)) => tracing::info!(
+                target: "sondera::llm",
+                provider = "vertex",
+                model = %self.config.model,
+                latency_ms = elapsed.as_millis() as u64,
+                prompt_tokens = usage.prompt_tokens,
+                completion_tokens = usage.completion_tokens,
+                total_tokens = usage.total(),
+                "vertex completion"
+            ),
+            Err(error) => tracing::warn!(
+                target: "sondera::llm",
+                provider = "vertex",
+                model = %self.config.model,
+                latency_ms = elapsed.as_millis() as u64,
+                error = %error,
+                "vertex completion failed"
+            ),
+        }
+        let (value, _usage) = result?;
+        Ok(value)
     }
 
     /// Resolve the request URL for the configured target (dedicated deployed endpoint, or the

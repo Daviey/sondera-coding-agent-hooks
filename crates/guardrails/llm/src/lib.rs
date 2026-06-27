@@ -412,6 +412,19 @@ pub fn schema_for<T: JsonSchema>() -> Value {
         .expect("schemars schema generation is infallible for supported types")
 }
 
+/// Token usage for a single completion, normalized across providers.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Usage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+}
+
+impl Usage {
+    pub(crate) fn total(self) -> u64 {
+        self.prompt_tokens + self.completion_tokens
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared HTTP helpers (retry + lenient JSON parse)
 // ---------------------------------------------------------------------------

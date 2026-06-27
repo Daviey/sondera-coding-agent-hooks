@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tracing::debug;
 
 use crate::schema::{ensure_all_properties_required, harden_schema};
 use crate::{LlmConfig, LlmError, Provider};
@@ -86,9 +85,32 @@ impl OpenAiCompatCompleter {
             schema,
             self.provider.supports_strict_json_schema(),
         );
-        debug!(url = %url, model = %self.config.model, provider = ?self.provider, "openai-compat request");
+        let started = std::time::Instant::now();
         let bearer = self.api_key.as_ref().map(|k| format!("Bearer {k}"));
-        send_and_parse(&self.http, &url, &body, bearer.as_deref(), timeout).await
+        let result = send_and_parse(&self.http, &url, &body, bearer.as_deref(), timeout).await;
+        let elapsed = started.elapsed();
+        match &result {
+            Ok((_, usage)) => tracing::info!(
+                target: "sondera::llm",
+                provider = ?self.provider,
+                model = %self.config.model,
+                latency_ms = elapsed.as_millis() as u64,
+                prompt_tokens = usage.prompt_tokens,
+                completion_tokens = usage.completion_tokens,
+                total_tokens = usage.total(),
+                "openai-compat completion"
+            ),
+            Err(error) => tracing::warn!(
+                target: "sondera::llm",
+                provider = ?self.provider,
+                model = %self.config.model,
+                latency_ms = elapsed.as_millis() as u64,
+                error = %error,
+                "openai-compat completion failed"
+            ),
+        }
+        let (value, _usage) = result?;
+        Ok(value)
     }
 }
 
@@ -155,7 +177,7 @@ pub(crate) async fn send_and_parse(
     body: &Value,
     bearer: Option<&str>,
     timeout: Duration,
-) -> Result<Value, LlmError> {
+) -> Result<(Value, crate::Usage), LlmError> {
     let build = || {
         let mut request = http
             .post(url)
@@ -195,7 +217,7 @@ pub(crate) async fn send_and_parse(
         .filter(|s| !s.is_empty())
         .ok_or(LlmError::NoContent)?;
 
-    Ok(crate::parse_lenient_json(&text)?)
+    Ok((crate::parse_lenient_json(&text)?, completion.usage.into()))
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +227,25 @@ pub(crate) async fn send_and_parse(
 #[derive(Deserialize)]
 struct ChatCompletion {
     choices: Vec<Choice>,
+    #[serde(default)]
+    usage: OpenAiUsage,
+}
+
+#[derive(Deserialize, Default)]
+struct OpenAiUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+}
+
+impl From<OpenAiUsage> for crate::Usage {
+    fn from(u: OpenAiUsage) -> Self {
+        crate::Usage {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+        }
+    }
 }
 
 #[derive(Deserialize)]
