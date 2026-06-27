@@ -14,6 +14,16 @@ Works with [Claude Code](https://code.claude.com/docs/en/hooks),
 [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks),
 and [Gemini CLI](https://geminicli.com/docs/hooks/).
 
+## Documentation
+
+- [Architecture](docs/architecture.md) - request flow, the trajectory/event model, entities, and how a decision is reached
+- [Guardrails](docs/guardrails.md) - the YARA, IFC, and policy subsystems and how to extend each
+- [Policies](docs/policies.md) - writing and loading Cedar policies
+- [Hooks](docs/hooks.md) - installing per-agent hooks and the stdin/stdout contract
+- [Configuration](docs/configuration.md) - providers, credentials, Vertex, fail mode, CLI flags
+- [Deployment](docs/deployment.md) - socket hardening, systemd, multi-user, production fail mode
+- [Development](docs/development.md) - building, testing, the fork/upstream flow, extending
+
 ## Getting Started
 
 ### Prerequisites
@@ -105,13 +115,13 @@ The `sondera-claude` binary registers hooks for all Claude Code lifecycle
 events (pre-tool-use, post-tool-use, session-start, etc.). Choose a scope:
 
 ```bash
-# Local (default) — .claude/settings.local.json, not committed to git
+# Local (default): .claude/settings.local.json, not committed to git
 cargo run -p sondera-claude -- install
 
-# Project — .claude/settings.json, committed to git, shared with team
+# Project: .claude/settings.json, committed to git, shared with team
 cargo run -p sondera-claude -- install --project
 
-# User — ~/.claude/settings.json, applies to all projects
+# User: ~/.claude/settings.json, applies to all projects
 cargo run -p sondera-claude -- install --user
 ```
 
@@ -150,7 +160,7 @@ policies/
 ```
 
 Write your own `.cedar` files into this directory to add custom rules. The
-harness evaluates all policies on every hook event — a single matching `forbid`
+harness evaluates all policies on every hook event: a single matching `forbid`
 overrides any `permit`.
 
 ### 4. Examples
@@ -171,10 +181,10 @@ per-agent **hook adapter** binaries over stdin/stdout JSON. Each hook binary
 forwards events over **tarpc RPC** (Unix socket) to the harness service layer,
 which coordinates three guardrail subsystems:
 
-1. **Signature Engine** (YARA-X) — pattern-matches tool inputs/outputs for prompt injection, data exfiltration, secrets,
+1. **Signature Engine** (YARA-X): pattern-matches tool inputs/outputs for prompt injection, data exfiltration, secrets,
    and obfuscation.
-2. **Policy Model** (configured LLM via `sondera-llm`) — classifies content against secure code generation categories.
-3. **Information Flow Control** (configured LLM via `sondera-llm`) — assigns sensitivity labels for data classification.
+2. **Policy Model** (configured LLM via `sondera-llm`): classifies content against secure code generation categories.
+3. **Information Flow Control** (configured LLM via `sondera-llm`): assigns sensitivity labels for data classification.
 
 The **Cedar Policy Engine** loads policies and schema fragments authored by a
 policy agent via the MCP server, combines guardrail signals with entity state
@@ -195,7 +205,7 @@ adapter normalizes its agent-specific JSON into four event categories:
 | **Control**     | Lifecycle events that manage the trajectory              | `Started`, `Completed`, `Failed`, `Adjudicated`                             |
 | **State**       | Snapshots of environment context                         | Working directory, open files, git branch                                   |
 
-Each adapter maps agent-specific tool names to these common types — Claude's
+Each adapter maps agent-specific tool names to these common types: Claude's
 `Bash` tool, Cursor's shell execution hook, Copilot's `bash` tool, and Gemini's
 `bash` tool all normalize to the same `ShellCommand` action. The harness
 evaluates policies against these normalized events, so Cedar rules work
