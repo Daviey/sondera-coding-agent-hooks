@@ -2,7 +2,8 @@
 #
 # A single label template with sensitivity categories for classifying data
 # based on Microsoft Purview sensitivity labels (Public, Internal, Confidential,
-# Highly Confidential). Uses the gpt-oss-safeguard Harmony prompt format.
+# Highly Confidential). Uses the Harmony prompt format. Works with any provider configured via
+# ~/.sondera/env (Anthropic, OpenAI, Ollama, Vertex, z.ai).
 #
 # See: https://learn.microsoft.com/en-us/purview/sensitivity-labels
 

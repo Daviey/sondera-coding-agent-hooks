@@ -1,14 +1,13 @@
-//! Integration tests for data sensitivity classification against a local Ollama server.
+//! Integration tests for data sensitivity classification against a configured LLM provider.
 //!
-//! These tests require a running Ollama instance with the `gpt-oss-safeguard:20b`
-//! model pulled.
+//! The provider (Anthropic / OpenAI / Ollama / Vertex / z.ai) is selected from the process
+//! environment via `~/.sondera/env` (see `sondera-llm`'s `LlmConfig::from_env`).
 //!
-//! To run:
-//!   cargo test -p sondera-information-flow-control --test ollama_integration
+//! To run against the default provider:
+//!   cargo test -p sondera-information-flow-control --test llm_integration -- --ignored
 //!
-//! Prerequisites:
-//!   ollama pull gpt-oss-safeguard:20b
-//!   ollama serve  # default: http://localhost:11434
+//! Prerequisites (example: Anthropic):
+//!   ANTHROPIC_API_KEY=sk-... in ~/.sondera/env   (or set SONDERA_PROVIDER=openai / ollama / ...)
 
 use sondera_information_flow_control::{
     DataModel, DataModelBuilder, Label, LabelTemplate, SensitivityClassification,
@@ -52,7 +51,7 @@ fn assert_sensitive(result: &SensitivityClassification, expected_label: Label) {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn public_press_release_is_not_sensitive() {
     let model = baseline_model();
     let content = "Our company was founded in 2010 and is headquartered in San Francisco. \
@@ -65,7 +64,7 @@ async fn public_press_release_is_not_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn public_open_source_license_is_not_sensitive() {
     let model = baseline_model();
     let content = "MIT License - Permission is hereby granted, free of charge, to any person \
@@ -78,7 +77,7 @@ async fn public_open_source_license_is_not_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn public_event_announcement_is_not_sensitive() {
     let model = baseline_model();
     let content = "The annual developer conference is scheduled for March 15th at 10 AM PST. \
@@ -95,7 +94,7 @@ async fn public_event_announcement_is_not_sensitive() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn internal_meeting_notes_are_sensitive() {
     let model = baseline_model();
     let content = "Team standup notes: We discussed sprint planning for Q2. \
@@ -106,7 +105,7 @@ async fn internal_meeting_notes_are_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn internal_company_memo_is_sensitive() {
     let model = baseline_model();
     let content = "Internal memo: The holiday schedule for this year has been updated. \
@@ -121,7 +120,7 @@ async fn internal_company_memo_is_sensitive() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn confidential_revenue_data_is_sensitive() {
     let model = baseline_model();
     let content = "Q3 revenue was $12.5M with a 15% increase over Q2. \
@@ -131,7 +130,7 @@ async fn confidential_revenue_data_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn confidential_customer_list_is_sensitive() {
     let model = baseline_model();
     let content = "Customer list includes: Acme Corp ($500K ARR), TechStart Inc ($250K ARR), \
@@ -141,7 +140,7 @@ async fn confidential_customer_list_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn confidential_pricing_strategy_is_sensitive() {
     let model = baseline_model();
     let content = "Pricing strategy: Enterprise tier at $50K/year, mid-market at $15K/year. \
@@ -155,7 +154,7 @@ async fn confidential_pricing_strategy_is_sensitive() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_ssn_is_sensitive() {
     let model = baseline_model();
     let content = "Employee SSN: 123-45-6789";
@@ -164,7 +163,7 @@ async fn highly_confidential_ssn_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_full_pii_is_sensitive() {
     let model = baseline_model();
     let content = "John Smith, DOB: 1985-03-15, Address: 123 Main St, Anytown, USA 12345. \
@@ -174,7 +173,7 @@ async fn highly_confidential_full_pii_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_credit_card_is_sensitive() {
     let model = baseline_model();
     let content = "Credit card: 4111-1111-1111-1111, Exp: 12/25, CVV: 123";
@@ -183,7 +182,7 @@ async fn highly_confidential_credit_card_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_passport_is_sensitive() {
     let model = baseline_model();
     let content = "Passport number: AB1234567, Expiry: 2028-05-20, \
@@ -197,7 +196,7 @@ async fn highly_confidential_passport_is_sensitive() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_api_key_is_sensitive() {
     let model = baseline_model();
     let content = "API_KEY=sk-live-abc123def456ghi789";
@@ -206,7 +205,7 @@ async fn highly_confidential_api_key_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_database_password_is_sensitive() {
     let model = baseline_model();
     let content = "DB_PASSWORD=MyS3cur3P@ssw0rd!";
@@ -215,7 +214,7 @@ async fn highly_confidential_database_password_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_aws_secret_key_is_sensitive() {
     let model = baseline_model();
     let content = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
@@ -224,7 +223,7 @@ async fn highly_confidential_aws_secret_key_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_private_key_is_sensitive() {
     let model = baseline_model();
     let content = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...";
@@ -237,7 +236,7 @@ async fn highly_confidential_private_key_is_sensitive() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_medical_record_is_sensitive() {
     let model = baseline_model();
     let content = "Patient diagnosis: Type 2 Diabetes, prescribed Metformin 500mg. \
@@ -247,7 +246,7 @@ async fn highly_confidential_medical_record_is_sensitive() {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn highly_confidential_mna_data_is_sensitive() {
     let model = baseline_model();
     let content = "M&A target: Acquiring CompetitorCo for $500M, announcement in 2 weeks. \
@@ -261,7 +260,7 @@ async fn highly_confidential_mna_data_is_sensitive() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn single_label_pii_detection() {
     let label = LabelTemplate::new("PII_CHECK")
         .instructions(
@@ -290,7 +289,7 @@ async fn single_label_pii_detection() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn baseline_public_content_passes_all_labels() {
     let model = baseline_model();
     let content = "Welcome to our open-source project! This README explains how to get started. \

@@ -30,16 +30,36 @@ cargo --version
 
 The YARA signature engine and Cedar policies work without any external
 dependencies. The LLM-based classifiers (data sensitivity and secure code
-policy) require [Ollama](https://ollama.com/) with the `gpt-oss-safeguard-20b`
-model:
+policy) support multiple providers, selected via `~/.sondera/env`:
+
+| `SONDERA_PROVIDER` | Auth                                              | Notes                                            |
+|--------------------|---------------------------------------------------|--------------------------------------------------|
+| `anthropic` (default) | `ANTHROPIC_API_KEY`                            | Claude; schema-validated structured output        |
+| `openai`           | `OPENAI_API_KEY`                                  | `gpt-4o-mini` and others                         |
+| `ollama`           | none                                              | Local; OpenAI-compatible endpoint                 |
+| `vertex`           | GCP Application Default Credentials               | `VERTEX_PROJECT` required; Gemini + partner models |
+| `zai`              | `ZAI_API_KEY`                                     | GLM models; OpenAI-compatible                     |
 
 ```bash
-# Install Ollama — see https://ollama.com/download for other platforms
-brew install ollama
+# Example: configure the default Anthropic provider
+mkdir -p ~/.sondera
+cat > ~/.sondera/env <<'EOF'
+SONDERA_PROVIDER=anthropic
+SONDERA_MODEL=claude-haiku-4-5
+ANTHROPIC_API_KEY=sk-ant-...
+EOF
 
-# Pull the model (~12 GB)
+# Or use a local Ollama instance
+cat > ~/.sondera/env <<'EOF'
+SONDERA_PROVIDER=ollama
+SONDERA_MODEL=gpt-oss-safeguard:20b
+EOF
 ollama pull gpt-oss-safeguard
 ```
+
+Override the base URL with `SONDERA_BASE_URL` (useful for proxies or
+self-hosted gateways). The harness server loads `~/.sondera/env` at startup so
+the classifiers run with whichever provider you configure.
 
 ### 1. Start the harness server
 
@@ -143,8 +163,8 @@ which coordinates three guardrail subsystems:
 
 1. **Signature Engine** (YARA-X) — pattern-matches tool inputs/outputs for prompt injection, data exfiltration, secrets,
    and obfuscation.
-2. **Policy Model** (gpt-oss-safeguard-20b via Ollama) — classifies content against secure code generation categories.
-3. **Information Flow Control** (gpt-oss-safeguard-20b via Ollama) — assigns sensitivity labels for data classification.
+2. **Policy Model** (configured LLM via `sondera-llm`) — classifies content against secure code generation categories.
+3. **Information Flow Control** (configured LLM via `sondera-llm`) — assigns sensitivity labels for data classification.
 
 The **Cedar Policy Engine** loads policies and schema fragments authored by a
 policy agent via the MCP server, combines guardrail signals with entity state
@@ -184,6 +204,7 @@ identically across all four agents.
 | Crate                         | Purpose                                                              |
 |-------------------------------|----------------------------------------------------------------------|
 | `crates/harness`              | Cedar policy engine, entity store, trajectory storage, tarpc RPC     |
+| `crates/guardrails/llm`       | Multi-provider structured-output LLM client (Anthropic/OpenAI/Ollama/Vertex/z.ai) |
 | `crates/guardrails/signature` | YARA-X signature scanning (prompt injection, exfiltration, secrets)  |
 | `crates/guardrails/ifc`       | LLM-based data classification (Microsoft Purview sensitivity labels) |
 | `crates/guardrails/policy`    | LLM-based policy evaluation (secure code generation categories)      |

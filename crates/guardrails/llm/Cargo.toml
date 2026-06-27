@@ -1,28 +1,21 @@
 [package]
-name = "sondera-policy"
+name = "sondera-llm"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "LLM-based policy evaluation guardrail for AI agent governance"
+description = "Multi-provider structured-output LLM client for Sondera guardrail classifiers"
 authors.workspace = true
 repository.workspace = true
 
-[[bin]]
-name = "policy-eval"
-path = "src/bin/policy_eval.rs"
-
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
-sondera-llm = { workspace = true }
+gcp_auth = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 schemars = { version = "1.2", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-strum = { version = "0.27.2", features = ["derive"] }
-strum_macros = "0.27.2"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"
-toml = "0.8"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

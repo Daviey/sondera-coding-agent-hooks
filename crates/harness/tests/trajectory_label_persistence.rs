@@ -3,9 +3,8 @@
 //! Verifies that the high-water mark label on a Trajectory entity survives
 //! multiple adjudication calls within the same harness instance.
 //!
-//! Requires Ollama running locally with the gpt-oss-safeguard model:
-//!   ollama pull gpt-oss-safeguard:20b
-//!   ollama serve
+//! Requires a configured LLM provider (see `~/.sondera/env`), e.g. Anthropic:
+//!   ANTHROPIC_API_KEY=sk-ant-...   # set in ~/.sondera/env
 //!
 //! Run with: cargo test -p sondera-harness -- --ignored trajectory_label
 

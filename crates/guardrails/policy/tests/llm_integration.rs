@@ -1,14 +1,13 @@
-//! Integration tests for policy evaluation against a local Ollama server.
+//! Integration tests for policy evaluation against a configured LLM provider.
 //!
-//! These tests require a running Ollama instance with the `gpt-oss-safeguard:20b`
-//! model pulled.
+//! The provider (Anthropic / OpenAI / Ollama / Vertex / z.ai) is selected from the process
+//! environment via `~/.sondera/env` (see `sondera-llm`'s `LlmConfig::from_env`).
 //!
-//! To run:
-//!   cargo test -p sondera-policy --test ollama_integration
+//! To run against the default provider:
+//!   cargo test -p sondera-policy --test llm_integration -- --ignored
 //!
-//! Prerequisites:
-//!   ollama pull gpt-oss-safeguard:20b
-//!   ollama serve  # default: http://localhost:11434
+//! Prerequisites (example: Anthropic):
+//!   ANTHROPIC_API_KEY=sk-... in ~/.sondera/env   (or set SONDERA_PROVIDER=openai / ollama / ...)
 
 use sondera_policy::{
     ConversationMessage, PolicyClassification, PolicyModel, PolicyModelBuilder, PolicyTemplate,
@@ -57,7 +56,7 @@ fn assert_non_compliant(result: &PolicyClassification, expected_category: &str) 
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn injection_sql_f_string_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -70,7 +69,7 @@ def get_user(user_id):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn injection_parameterized_query_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -88,7 +87,7 @@ def get_user(user_id):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn injection_os_system_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -105,7 +104,7 @@ def ping_host(hostname):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn secrets_hardcoded_api_key_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -118,7 +117,7 @@ response = requests.get("https://api.example.com/data", headers=headers)
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn secrets_env_var_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -141,7 +140,7 @@ response = requests.get("https://api.example.com/data", headers=headers)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn crypto_md5_password_hash_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -154,7 +153,7 @@ def hash_password(password):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn crypto_bcrypt_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -176,7 +175,7 @@ def hash_password(password):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn deserialization_pickle_loads_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -190,7 +189,7 @@ def handle_request(request):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn deserialization_json_loads_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -213,7 +212,7 @@ def handle_request(request):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn access_control_no_auth_delete_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -227,7 +226,7 @@ def delete_user(id):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn access_control_with_auth_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -253,7 +252,7 @@ def delete_user(id):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn path_traversal_unsanitized_join_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -267,7 +266,7 @@ fn read_upload(user_filename: &str) -> std::io::Result<Vec<u8>> {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn path_traversal_canonicalized_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -295,7 +294,7 @@ fn read_upload(user_filename: &str) -> anyhow::Result<Vec<u8>> {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn single_policy_injection_only() {
     let policy = PolicyTemplate::new("INJECTION_CHECK", "IJ")
         .instructions(
@@ -336,7 +335,7 @@ async fn single_policy_injection_only() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn evaluate_conversation_with_violation() {
     let model = baseline_model();
     let history = vec![
@@ -356,7 +355,7 @@ async fn evaluate_conversation_with_violation() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires a configured LLM provider (see ~/.sondera/env)"]
 async fn baseline_compliant_code_passes_all_policies() {
     let model = baseline_model();
     let code = r#"

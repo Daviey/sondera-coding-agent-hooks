@@ -1,21 +1,19 @@
-//! Policy model for evaluating content against customizable policy rules
-//! using [gpt-oss-safeguard](https://ollama.com/library/gpt-oss-safeguard).
+//! Policy model for evaluating content against customizable policy rules using an LLM.
 //!
-//! This crate uses the gpt-oss-safeguard reasoning model via Ollama to classify
-//! content against policy templates following the Harmony prompt format with
-//! multi-category severity tiers. The model returns a policy-referencing
+//! Prompts an LLM (via [`sondera_llm`]) to classify content against policy templates following the
+//! Harmony prompt format with multi-category severity tiers. The model returns a policy-referencing
 //! structured output: `{ "violation": 0|1, "policy_category": "<code>" }`.
+//!
+//! The provider (Anthropic / OpenAI / Ollama / Vertex / z.ai) is selected through
+//! [`PolicyModelConfig`] (see [`LlmConfig`]).
+//!
+//! [`LlmConfig`]: sondera_llm::LlmConfig
 
 mod policy;
 
-use ollama_rs::{
-    Ollama,
-    generation::chat::{ChatMessage, MessageRole, request::ChatMessageRequest},
-    generation::parameters::{FormatType, JsonStructure},
-    models::ModelOptions,
-};
 use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
+use sondera_llm::{LlmClient, LlmConfig};
 use std::path::Path;
 use std::time::Duration;
 use strum_macros::{Display, EnumString};
@@ -24,14 +22,16 @@ use tracing::instrument;
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
 
+pub use sondera_llm::Provider;
+
 // ---------------------------------------------------------------------------
-// Structured output from gpt-oss-safeguard
+// Structured output from the policy model
 // ---------------------------------------------------------------------------
 
-/// Policy-referencing structured output returned by gpt-oss-safeguard.
+/// Policy-referencing structured output returned by the model.
 ///
-/// Category labels encourage gpt-oss-safeguard to reason about which section of
-/// the policy applies, keeping outputs concise.
+/// Category labels encourage the model to reason about which section of the policy applies,
+/// keeping outputs concise.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchemaDerive)]
 pub struct PolicyModelResult {
     /// `1` if the content violates the policy, `0` if compliant.
@@ -47,12 +47,12 @@ pub struct PolicyModelResult {
 /// Errors that can occur during policy evaluation.
 #[derive(Debug, Error)]
 pub enum PolicyError {
-    #[error("Ollama API error: {0}")]
-    OllamaError(String),
-    #[error("Failed to parse classification response: {0}")]
-    ParseError(#[from] serde_json::Error),
+    #[error("LLM error: {0}")]
+    Llm(#[from] sondera_llm::LlmError),
     #[error("Policy model not available: {0}")]
     ModelNotAvailable(String),
+    #[error("Failed to parse classification response: {0}")]
+    ParseError(#[from] serde_json::Error),
     #[error("No policy templates configured")]
     NoPolicies,
     #[error("Invalid content: {0}")]
@@ -126,66 +126,60 @@ impl ConversationMessage {
     }
 }
 
-impl From<ConversationRole> for MessageRole {
-    fn from(role: ConversationRole) -> Self {
-        match role {
-            ConversationRole::User => MessageRole::User,
-            ConversationRole::Assistant => MessageRole::Assistant,
-            ConversationRole::System => MessageRole::System,
-            ConversationRole::Tool => MessageRole::Tool,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Model configuration
 // ---------------------------------------------------------------------------
 
 /// Configuration for the policy model.
+///
+/// A thin wrapper over [`LlmConfig`] that selects the LLM provider. Defaults to reading the
+/// provider from the process environment (see [`LlmConfig::from_env`]); pass an explicit config
+/// via [`PolicyModel::with_config`] for full control.
 #[derive(Debug, Clone)]
 pub struct PolicyModelConfig {
-    /// Ollama host URL (default: http://localhost)
-    pub host: String,
-    /// Ollama port (default: 11434)
-    pub port: u16,
-    /// Model name (default: gpt-oss-safeguard:20b)
-    pub model: String,
-    /// Temperature for model inference (default: 0.0 for deterministic output)
-    pub temperature: f32,
+    /// Underlying LLM provider configuration.
+    pub llm: LlmConfig,
 }
 
 impl Default for PolicyModelConfig {
     fn default() -> Self {
         Self {
-            host: "http://localhost".to_string(),
-            port: 11434,
-            model: "gpt-oss-safeguard:20b".to_string(),
-            temperature: 0.0,
+            llm: LlmConfig::from_env(),
         }
     }
 }
 
 impl PolicyModelConfig {
     pub fn with_model(model: impl Into<String>) -> Self {
-        Self {
-            model: model.into(),
-            ..Default::default()
-        }
+        let mut config = Self::default();
+        config.llm.model = model.into();
+        config
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.host = host.into();
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.llm.provider = provider;
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.llm.base_url = Some(base_url.into());
+        self
+    }
+
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.llm.model = model.into();
         self
     }
 
     pub fn temperature(mut self, temperature: f32) -> Self {
-        self.temperature = temperature;
+        self.llm.temperature = temperature;
         self
+    }
+}
+
+impl From<LlmConfig> for PolicyModelConfig {
+    fn from(llm: LlmConfig) -> Self {
+        Self { llm }
     }
 }
 
@@ -193,12 +187,12 @@ impl PolicyModelConfig {
 // PolicyModel
 // ---------------------------------------------------------------------------
 
-/// Policy model using gpt-oss-safeguard for evaluating content against policy
-/// templates with multi-category severity tiers.
+/// Policy model using an LLM for evaluating content against policy templates with multi-category
+/// severity tiers.
 ///
-/// Each [`PolicyTemplate`] is evaluated independently. The model returns a
-/// policy-referencing structured output (`violation` + `policy_category`)
-/// which is mapped to a [`PolicyViolation`] when the content violates the policy.
+/// Each [`PolicyTemplate`] is evaluated independently. The model returns a policy-referencing
+/// structured output (`violation` + `policy_category`) which is mapped to a [`PolicyViolation`]
+/// when the content violates the policy.
 ///
 /// # Example
 ///
@@ -225,7 +219,7 @@ impl PolicyModelConfig {
 /// # }
 /// ```
 pub struct PolicyModel {
-    ollama: Ollama,
+    client: Option<LlmClient>,
     config: PolicyModelConfig,
     policies: Vec<PolicyTemplate>,
 }
@@ -241,9 +235,9 @@ impl PolicyModel {
     }
 
     pub fn with_config(policies: Vec<PolicyTemplate>, config: PolicyModelConfig) -> Self {
-        let ollama = Ollama::new(config.host.clone(), config.port);
+        let client = LlmClient::try_new_opt(config.llm.clone());
         Self {
-            ollama,
+            client,
             config,
             policies,
         }
@@ -317,7 +311,12 @@ impl PolicyModel {
 
     /// Get the current model name.
     pub fn model(&self) -> &str {
-        &self.config.model
+        &self.config.llm.model
+    }
+
+    /// Get the selected provider.
+    pub fn provider(&self) -> Provider {
+        self.config.llm.provider
     }
 
     /// Get the current configuration.
@@ -325,10 +324,10 @@ impl PolicyModel {
         &self.config
     }
 
-    /// Health check to verify Ollama is responsive.
+    /// Health check to verify the configured provider is reachable.
     ///
-    /// Returns Ok(()) if Ollama responds within 5 seconds, Err otherwise.
-    /// Use this at startup to fail fast if Ollama is unavailable.
+    /// Returns Ok(()) if the provider responds within 5 seconds, Err otherwise.
+    /// Use this at startup to fail fast if the API is unavailable.
     pub async fn health_check(&self) -> Result<(), PolicyError> {
         if let Some(policy) = self.policies.first() {
             self.evaluate_single(policy, "health check", Duration::from_secs(5))
@@ -347,27 +346,19 @@ impl PolicyModel {
         content: &str,
         timeout: Duration,
     ) -> Result<PolicyModelResult, PolicyError> {
+        let client = self.client.as_ref().ok_or_else(|| {
+            PolicyError::ModelNotAvailable(
+                "LLM client not configured (missing API key/credentials for the selected provider)"
+                    .into(),
+            )
+        })?;
+
         let system_prompt = policy.render();
         let user_prompt = policy.render_user_message(content);
 
-        let messages = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(user_prompt),
-        ];
-
-        let format =
-            FormatType::StructuredJson(Box::new(JsonStructure::new::<PolicyModelResult>()));
-
-        let request = ChatMessageRequest::new(self.config.model.clone(), messages)
-            .format(format)
-            .options(ModelOptions::default().temperature(self.config.temperature));
-
-        let response = tokio::time::timeout(timeout, self.ollama.send_chat_messages(request))
-            .await
-            .map_err(|_| PolicyError::Timeout)?
-            .map_err(|e| PolicyError::OllamaError(e.to_string()))?;
-
-        let result: PolicyModelResult = serde_json::from_str(&response.message.content)?;
+        let result = client
+            .complete_json_as::<PolicyModelResult>(&system_prompt, &user_prompt, timeout)
+            .await?;
 
         Ok(result)
     }
@@ -401,23 +392,23 @@ impl PolicyModelBuilder {
         self
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.config.host = host.into();
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.config.llm.provider = provider;
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.config.port = port;
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.config.llm.base_url = Some(base_url.into());
         self
     }
 
     pub fn model(mut self, model: impl Into<String>) -> Self {
-        self.config.model = model.into();
+        self.config.llm.model = model.into();
         self
     }
 
     pub fn temperature(mut self, temperature: f32) -> Self {
-        self.config.temperature = temperature;
+        self.config.llm.temperature = temperature;
         self
     }
 
@@ -529,16 +520,16 @@ mod tests {
     #[test]
     fn policy_model_builder() {
         let model = PolicyModelBuilder::new()
-            .host("http://192.168.1.100")
-            .port(11435)
-            .model("gpt-oss-safeguard:120b")
+            .provider(Provider::Anthropic)
+            .base_url("https://proxy.example.com")
+            .model("claude-opus-4-8")
             .temperature(0.1)
             .policy(PolicyTemplate::new("P1", "A").category("A0", "Safe", "Safe."))
             .policy(PolicyTemplate::new("P2", "B").category("B0", "Safe", "Safe."))
             .build();
 
-        assert_eq!(model.model(), "gpt-oss-safeguard:120b");
-        assert_eq!(model.config().host, "http://192.168.1.100");
+        assert_eq!(model.provider(), Provider::Anthropic);
+        assert_eq!(model.model(), "claude-opus-4-8");
         assert_eq!(model.policies().len(), 2);
     }
 
@@ -621,13 +612,17 @@ category = "SC0"
     }
 
     #[test]
-    fn policy_model_from_toml() {
+    fn policy_model_from_toml_uses_explicit_config() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../policies/policies.toml"
         );
-        let model = PolicyModel::from_toml(path).unwrap();
+        let config =
+            PolicyModelConfig::with_model("claude-haiku-4-5").provider(Provider::Anthropic);
+        let policies = PolicyTemplate::load_from_toml(path).unwrap();
+        let model = PolicyModel::with_config(policies, config);
         assert_eq!(model.policies().len(), 1);
-        assert_eq!(model.model(), "gpt-oss-safeguard:20b");
+        assert_eq!(model.model(), "claude-haiku-4-5");
+        assert_eq!(model.provider(), Provider::Anthropic);
     }
 }

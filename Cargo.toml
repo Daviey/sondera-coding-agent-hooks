@@ -6,6 +6,7 @@ members = [
     "apps/cursor",
     "apps/gemini",
     "crates/guardrails/ifc",
+    "crates/guardrails/llm",
     "crates/guardrails/policy",
     "crates/guardrails/signature",
     "crates/harness",
@@ -22,6 +23,7 @@ sondera-harness = { path = "crates/harness" }
 sondera-hooks-common = { path = "crates/common" }
 sondera-mcp = { path = "crates/mcp" }
 sondera-signature = { path = "crates/guardrails/signature" }
+sondera-llm = { path = "crates/guardrails/llm" }
 sondera-policy = { path = "crates/guardrails/policy" }
 sondera-information-flow-control = { path = "crates/guardrails/ifc" }
 

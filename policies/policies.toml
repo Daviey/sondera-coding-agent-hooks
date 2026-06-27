@@ -2,7 +2,8 @@
 #
 # A single policy template with severity categories for evaluating AI-generated
 # code against OWASP Top 10, CWE categories, and secure coding practices.
-# Uses the gpt-oss-safeguard Harmony prompt format with policy-referencing output.
+# Uses the Harmony prompt format with policy-referencing output. Works with any provider
+# configured via ~/.sondera/env (Anthropic, OpenAI, Ollama, Vertex, z.ai).
 
 [[policies]]
 name = "SECURE_CODE_GENERATION"
