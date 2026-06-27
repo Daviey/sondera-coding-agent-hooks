@@ -3,7 +3,7 @@
 //! Provides the common I/O plumbing that every hook binary needs:
 //! - JSON stdin/stdout for communicating with the host IDE
 //! - Tracing initialization (logs to stderr to keep stdout clean for JSON)
-//! - Environment loading from `~/.sondera/env`
+//! - Environment loading (system file then user file, org-enforced precedence)
 //! - Agent identity construction
 //! - Harness client connection via default Unix socket
 
@@ -67,21 +67,17 @@ pub fn init_tracing(crate_name: &str, verbose: bool) {
         .ok();
 }
 
-/// Load environment from ~/.sondera/env if it exists.
+/// Load environment configuration: the system file (`/etc/sondera/env` or `SONDERA_SYSTEM_ENV`)
+/// then the user file (`~/.sondera/env`), with organization-enforced precedence. See
+/// [`sondera_config`] for the precedence rules.
 pub fn load_sondera_env() -> Result<()> {
-    let env_path = sondera_env_path()?;
-    if env_path.exists() {
-        dotenvy::from_path(&env_path)?;
-    } else {
-        tracing::warn!("Environment file not found at {:?}", env_path);
-    }
+    sondera_config::load();
     Ok(())
 }
 
-/// Get the path to ~/.sondera/env.
+/// Get the path to the user environment file (`~/.sondera/env`).
 pub fn sondera_env_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
-    Ok(home.join(".sondera").join("env"))
+    sondera_config::user_env_path().context("Could not determine home directory")
 }
 
 /// Create an agent ID from provider name and current username.

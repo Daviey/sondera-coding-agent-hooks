@@ -1,0 +1,16 @@
+[package]
+name = "sondera-config"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Environment loading for Sondera hooks and harness with org-enforced precedence"
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+dirs = "6"
+dotenvy = "0.15"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

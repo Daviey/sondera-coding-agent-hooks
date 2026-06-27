@@ -5322,6 +5322,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sondera-config"
+version = "0.1.0"
+dependencies = [
+ "dirs 6.0.0",
+ "dotenvy",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "sondera-copilot"
 version = "0.1.0"
 dependencies = [
@@ -5385,13 +5395,13 @@ dependencies = [
  "chrono",
  "clap",
  "dirs 6.0.0",
- "dotenvy",
  "fjall",
  "futures",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "shlex",
+ "sondera-config",
  "sondera-information-flow-control",
  "sondera-policy",
  "sondera-signature",
@@ -5413,10 +5423,9 @@ name = "sondera-hooks-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dirs 5.0.1",
- "dotenvy",
  "serde",
  "serde_json",
+ "sondera-config",
  "sondera-harness",
  "tracing",
  "tracing-subscriber",

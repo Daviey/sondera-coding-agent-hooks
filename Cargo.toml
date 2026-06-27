@@ -11,6 +11,7 @@ members = [
     "crates/guardrails/signature",
     "crates/harness",
     "crates/common",
+    "crates/config",
     "crates/mcp",
 ]
 
@@ -24,6 +25,7 @@ sondera-hooks-common = { path = "crates/common" }
 sondera-mcp = { path = "crates/mcp" }
 sondera-signature = { path = "crates/guardrails/signature" }
 sondera-llm = { path = "crates/guardrails/llm" }
+sondera-config = { path = "crates/config" }
 sondera-policy = { path = "crates/guardrails/policy" }
 sondera-information-flow-control = { path = "crates/guardrails/ifc" }
 

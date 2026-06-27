@@ -44,10 +44,11 @@ async fn main() -> Result<()> {
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
-    // Load ~/.sondera/env so the LLM-based classifiers can read their provider credentials
-    // (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, ZAI_API_KEY). The hook clients load the same file,
-    // but the provider API calls happen server-side, so the env must be present in this process.
-    load_sondera_env();
+    // Load environment configuration: the system file (`/etc/sondera/env` or `SONDERA_SYSTEM_ENV`)
+    // then the user file (`~/.sondera/env`), with organization-enforced precedence. The hook
+    // clients load the same layers, but the classifier API calls happen server-side, so the env
+    // must be present in this process.
+    sondera_config::load();
 
     let socket_path = args.socket.unwrap_or_else(rpc::default_socket_path);
 
@@ -58,21 +59,4 @@ async fn main() -> Result<()> {
     rpc::serve(harness, &socket_path).await?;
 
     Ok(())
-}
-
-/// Load environment variables from `~/.sondera/env` if it exists, mirroring the hook clients.
-fn load_sondera_env() {
-    let Some(env_path) = dirs::home_dir().map(|h| h.join(".sondera").join("env")) else {
-        tracing::warn!("Could not determine home directory; skipping ~/.sondera/env");
-        return;
-    };
-    if !env_path.exists() {
-        tracing::debug!("No environment file at {:?}", env_path);
-        return;
-    }
-    if let Err(e) = dotenvy::from_path(&env_path) {
-        tracing::warn!("Failed to load {:?}: {}", env_path, e);
-    } else {
-        tracing::debug!("Loaded environment from {:?}", env_path);
-    }
 }

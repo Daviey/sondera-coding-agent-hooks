@@ -1,18 +1,32 @@
 # Configuration
 
-The harness reads its runtime configuration from environment variables. Put them in `~/.sondera/env` as `KEY=value` lines. Both the hook clients and the harness server load this file at startup, so the classifier calls (which run inside the server process) see the same settings as the agent adapters.
+The harness reads its runtime configuration from environment variables. These come from two files, loaded in order:
+
+1. the system file at `/etc/sondera/env` (overridable with `SONDERA_SYSTEM_ENV`), owned by the organization;
+2. the user file at `~/.sondera/env`, owned by the user.
+
+Both the hook clients and the harness server load these layers at startup, so the classifier calls (which run inside the server process) see the same settings as the agent adapters.
+
+Precedence is first-set-wins: a variable already set in the process environment, or in an earlier file, is never overwritten. The effective order is process environment, then system file, then user file. An organization can pin security-relevant settings (`SONDERA_PROVIDER`, `SONDERA_FAIL_MODE`, `SONDERA_BASE_URL`) and a user cannot relax them, while still supplying their own values for anything left unset, such as a personal API key.
 
 ```bash
+# system file (organization-managed)
+sudo mkdir -p /etc/sondera
+sudo tee /etc/sondera/env >/dev/null <<'EOF'
+SONDERA_PROVIDER=anthropic
+SONDERA_FAIL_MODE=closed-hard
+EOF
+sudo chmod 644 /etc/sondera/env
+
+# user file (personal credentials)
 mkdir -p ~/.sondera
 cat > ~/.sondera/env <<'EOF'
-SONDERA_PROVIDER=anthropic
-SONDERA_MODEL=claude-haiku-4-5
 ANTHROPIC_API_KEY=sk-ant-...
 EOF
 chmod 600 ~/.sondera/env
 ```
 
-Any variable can also be exported directly in the shell that launches the server, which overrides the file.
+Any variable can also be exported directly in the shell that launches the server, which beats both files.
 
 ## Provider and model
 
@@ -24,6 +38,7 @@ Selects which LLM serves the data-sensitivity (IFC) and secure-code (policy) cla
 | `SONDERA_MODEL` | model id | per-provider default (see below) |
 | `SONDERA_TEMPERATURE` | sampling temperature, float | `0.0` |
 | `SONDERA_BASE_URL` | override the provider's base URL (proxies, gateways, self-hosted) | the provider's standard endpoint |
+| `SONDERA_SYSTEM_ENV` | path to the system env file | `/etc/sondera/env` |
 
 Default model per provider: `claude-haiku-4-5` (anthropic), `gpt-4o-mini` (openai), `gpt-oss-safeguard:20b` (ollama), `gemini-2.0-flash` (vertex), `glm-4.6` (zai).
 
