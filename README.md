@@ -61,6 +61,14 @@ Override the base URL with `SONDERA_BASE_URL` (useful for proxies or
 self-hosted gateways). The harness server loads `~/.sondera/env` at startup so
 the classifiers run with whichever provider you configure.
 
+`SONDERA_FAIL_MODE` controls what happens when a classifier is unavailable or
+errors (`open` by default, or `closed`):
+
+| Mode     | On classifier failure                                                                 |
+|----------|---------------------------------------------------------------------------------------|
+| `open`   | Substitute benign defaults (Public / compliant) so Cedar permits the action.          |
+| `closed` | Substitute restrictive defaults (Highly Confidential / a `FAIL_CLOSED` violation) so Cedar denies. Use where an unavailable classifier must never let a sensitive operation through. |
+
 ### 1. Start the harness server
 
 The harness server loads Cedar policies and listens on a Unix socket for

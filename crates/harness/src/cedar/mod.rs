@@ -14,11 +14,77 @@ use cedar_policy::{
     Authorizer, Context, Entity, EntityId, EntityUid, PolicyId, PolicySet, Request, Response,
     Schema, SchemaFragment,
 };
-use sondera_information_flow_control::DataModel;
-use sondera_policy::PolicyModel;
+use sondera_information_flow_control::{DataModel, Label};
+use sondera_policy::{PolicyClassification, PolicyModel, PolicyViolation};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tracing::{debug, instrument, warn};
+
+/// How the harness treats a classifier (IFC data-sensitivity or policy) failure.
+///
+/// The LLM classifiers are probabilistic and depend on a remote API; they can fail transiently
+/// or be unavailable. This does not change Cedar's deterministic evaluation — it chooses what
+/// classification the harness substitutes when a classifier errors, which then flows into Cedar
+/// as context:
+///
+/// - [`FailMode::Open`] (default): substitute benign defaults (Public label, compliant policy) so
+///   Cedar permits the action. Matches the historical non-blocking behavior.
+/// - [`FailMode::Closed`]: substitute restrictive defaults (HighlyConfidential label, a synthetic
+///   policy violation) so Cedar's forbids deny the action. Use where an unavailable classifier
+///   must never let a sensitive operation through.
+///
+/// Selected from `SONDERA_FAIL_MODE` (`open` / `closed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailMode {
+    /// On classifier failure, treat content as benign so Cedar permits.
+    Open,
+    /// On classifier failure, treat content as maximally sensitive + non-compliant so Cedar denies.
+    Closed,
+}
+
+impl FailMode {
+    /// Parse the mode from a string value (`open` / `closed`, plus `deny` / `fail-closed` aliases).
+    /// Empty or unrecognized values fall back to [`FailMode::Open`].
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "closed" | "deny" | "fail-closed" => FailMode::Closed,
+            _ => FailMode::Open,
+        }
+    }
+
+    /// Read the mode from the `SONDERA_FAIL_MODE` environment variable. Defaults to [`FailMode::Open`].
+    pub fn from_env() -> Self {
+        Self::parse(&std::env::var("SONDERA_FAIL_MODE").unwrap_or_default())
+    }
+}
+
+/// Sensitivity label to substitute when the IFC classifier is unavailable, per the fail mode.
+fn default_label_for(mode: FailMode) -> Label {
+    match mode {
+        FailMode::Open => Label::Public,
+        FailMode::Closed => Label::HighlyConfidential,
+    }
+}
+
+/// Policy classification to substitute when the policy classifier is unavailable, per the fail
+/// mode. Fail-closed yields a synthetic `FAIL_CLOSED` violation so Cedar's policy-violation
+/// forbids apply.
+fn default_classification_for(mode: FailMode) -> PolicyClassification {
+    match mode {
+        FailMode::Open => PolicyClassification {
+            compliant: true,
+            violations: Vec::new(),
+        },
+        FailMode::Closed => PolicyClassification {
+            compliant: false,
+            violations: vec![PolicyViolation {
+                category: "ClassifierUnavailable".into(),
+                rule: "FAIL_CLOSED".into(),
+                description: "policy classifier unavailable; denying under fail-closed mode".into(),
+            }],
+        },
+    }
+}
 
 pub struct CedarPolicyHarness {
     authorizer: Authorizer,
@@ -28,6 +94,7 @@ pub struct CedarPolicyHarness {
     policy_set: PolicySet,
     data_model: DataModel,
     policy_model: PolicyModel,
+    fail_mode: FailMode,
 }
 
 impl CedarPolicyHarness {
@@ -185,6 +252,7 @@ impl CedarPolicyHarness {
             policy_set,
             data_model,
             policy_model,
+            fail_mode: FailMode::from_env(),
         })
     }
 
@@ -210,6 +278,44 @@ impl CedarPolicyHarness {
     /// Get the loaded schema.
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    /// The configured classifier failure mode.
+    pub fn fail_mode(&self) -> FailMode {
+        self.fail_mode
+    }
+
+    /// Classify content sensitivity, substituting a fail-mode default if the IFC classifier
+    /// errors. The returned [`Label`] is the max sensitivity among matched label templates (or
+    /// the fail-mode default). Never propagates a classifier error.
+    async fn classify_label(&self, content: &str) -> Label {
+        match self.data_model.classify(content).await {
+            Ok(classification) => classification.max_label(),
+            Err(error) => {
+                warn!(
+                    %error,
+                    fail_mode = ?self.fail_mode,
+                    "data classifier failed; applying fail-mode default label"
+                );
+                default_label_for(self.fail_mode)
+            }
+        }
+    }
+
+    /// Evaluate content against the policy templates, substituting a fail-mode default if the
+    /// policy classifier errors. Never propagates a classifier error.
+    async fn evaluate_policy(&self, content: &str) -> PolicyClassification {
+        match self.policy_model.evaluate_content(content).await {
+            Ok(classification) => classification,
+            Err(error) => {
+                warn!(
+                    %error,
+                    fail_mode = ?self.fail_mode,
+                    "policy classifier failed; applying fail-mode default classification"
+                );
+                default_classification_for(self.fail_mode)
+            }
+        }
     }
 
     pub fn is_authorized(&self, request: &Request) -> Result<Response> {
@@ -354,5 +460,48 @@ impl Harness for CedarPolicyHarness {
             .await?;
 
         Ok(adjudicated)
+    }
+}
+
+#[cfg(test)]
+mod fail_mode_tests {
+    use super::*;
+
+    #[test]
+    fn parse_fail_mode() {
+        assert_eq!(FailMode::parse("closed"), FailMode::Closed);
+        assert_eq!(FailMode::parse("CLOSED"), FailMode::Closed);
+        assert_eq!(FailMode::parse(" deny "), FailMode::Closed);
+        assert_eq!(FailMode::parse("fail-closed"), FailMode::Closed);
+        assert_eq!(FailMode::parse("open"), FailMode::Open);
+        assert_eq!(FailMode::parse(""), FailMode::Open, "empty defaults to open");
+        assert_eq!(FailMode::parse("garbage"), FailMode::Open, "unknown defaults to open");
+    }
+
+    #[test]
+    fn default_label_is_polarized_by_mode() {
+        assert_eq!(default_label_for(FailMode::Open), Label::Public);
+        assert_eq!(
+            default_label_for(FailMode::Closed),
+            Label::HighlyConfidential,
+            "fail-closed must classify unclassifiable content as maximally sensitive"
+        );
+    }
+
+    #[test]
+    fn default_classification_is_polarized_by_mode() {
+        let open = default_classification_for(FailMode::Open);
+        assert!(open.compliant);
+        assert!(open.violations.is_empty());
+
+        let closed = default_classification_for(FailMode::Closed);
+        assert!(!closed.compliant, "fail-closed must be non-compliant");
+        assert!(
+            closed
+                .violations
+                .iter()
+                .any(|v| v.rule == "FAIL_CLOSED"),
+            "fail-closed must carry a synthetic FAIL_CLOSED violation"
+        );
     }
 }
