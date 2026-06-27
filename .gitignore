@@ -27,3 +27,7 @@ target
 
 # Debug
 *.log
+
+# opencode plugin build artifacts
+plugins/opencode/node_modules/
+plugins/opencode/sondera-bundled.ts

@@ -1,0 +1,60 @@
+{
+  "name": "opencode-sondera",
+  "version": "0.0.5",
+  "description": "opencode plugin for the Sondera harness (Cedar policy enforcement). The Rust adapter lives in apps/opencode in the same repo.",
+  "main": "sondera-bundled.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./sondera-bundled.ts",
+    "./plugin": "./sondera-bundled.ts",
+    "./src/*": "./src/*.ts"
+  },
+  "files": [
+    "sondera-bundled.ts",
+    "src/index.ts",
+    "src/client.ts",
+    "src/normalize.ts",
+    "src/types.ts",
+    "src/config.ts",
+    "src/audit.ts",
+    "src/metrics.ts",
+    "src/toast.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "sync-bundle": "bun scripts/sync-bundle.ts",
+    "prepublishOnly": "bun run sync-bundle"
+  },
+  "keywords": ["opencode", "sondera", "cedar", "policy", "security", "ai-safety"],
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Daviey/sondera-coding-agent-hooks.git",
+    "directory": "plugins/opencode"
+  },
+  "homepage": "https://github.com/Daviey/sondera-coding-agent-hooks/tree/main/plugins/opencode",
+  "bugs": {
+    "url": "https://github.com/Daviey/sondera-coding-agent-hooks/issues"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.13",
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  }
+}

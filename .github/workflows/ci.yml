@@ -54,6 +54,42 @@ jobs:
       - name: Run cargo test
         run: cargo test --workspace
 
+  plugin:
+    name: opencode plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: plugin
+
+      - name: Build harness + adapter (for the integration test)
+        run: cargo build -p sondera-harness -p sondera-opencode
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        working-directory: plugins/opencode
+        run: bun install
+
+      - name: Typecheck
+        working-directory: plugins/opencode
+        run: bun run typecheck
+
+      - name: Test (unit, client, integration against the built binaries)
+        working-directory: plugins/opencode
+        env:
+          # runner.temp is private to the job; a world-writable /tmp path would be a predictable,
+          # raceable socket location.
+          SONDERA_SOCKET: ${{ runner.temp }}/sondera-ci.sock
+        run: bun test
+
   security:
     name: Security
     runs-on: ubuntu-latest
