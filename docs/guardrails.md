@@ -107,3 +107,5 @@ Add `[[policies.examples]]` blocks (`content`, `violation`, `category`) to ancho
 ## Deterministic versus probabilistic
 
 YARA and Cedar are deterministic: the same input yields the same verdict, with no API dependency. The IFC and policy classifiers depend on the configured LLM provider and are therefore probabilistic, which is why the harness retries transient failures and applies a fail mode when a classifier is unavailable (see `docs/configuration.md`). For the highest-assurance controls, express them as a YARA rule or a Cedar policy; use the LLM classifiers for judgement calls those cannot make, such as "is this code vulnerable" or "is this data confidential".
+
+Both LLM classifiers memoize their results in a bounded in-process LRU keyed by the SHA-256 of the content (1024 entries each). The same command, file, or output classified twice hits the cache and skips the LLM entirely. The cache holds only real LLM results, never the fail-mode substitutes, and resets when the server restarts (when policies or templates change, restart the server).

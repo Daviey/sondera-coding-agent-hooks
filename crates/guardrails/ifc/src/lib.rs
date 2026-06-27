@@ -17,8 +17,11 @@
 mod label;
 
 use futures::stream::StreamExt;
+use lru::LruCache;
+use sha2::{Digest, Sha256};
 use sondera_llm::{LlmClient, LlmConfig};
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::instrument;
@@ -29,6 +32,11 @@ pub use label::{
 };
 
 pub use sondera_llm::Provider;
+
+/// Maximum number of cached classifications kept in memory (LRU). Content is keyed by its
+/// SHA-256 digest; templates and model config are fixed for the server lifetime, so a cached
+/// result is valid until restart.
+const CACHE_CAPACITY: usize = 1024;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -153,6 +161,13 @@ pub struct DataModel {
     client: Option<LlmClient>,
     config: DataModelConfig,
     labels: Vec<LabelTemplate>,
+    cache: Mutex<LruCache<[u8; 32], SensitivityClassification>>,
+}
+
+/// SHA-256 digest of the content, used as the cache key.
+fn cache_key(content: &str) -> [u8; 32] {
+    let digest = Sha256::digest(content.as_bytes());
+    digest.into()
 }
 
 impl DataModel {
@@ -174,6 +189,7 @@ impl DataModel {
             client,
             config,
             labels,
+            cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(CACHE_CAPACITY).unwrap())),
         }
     }
 
@@ -188,6 +204,20 @@ impl DataModel {
     ) -> Result<SensitivityClassification, DataClassificationError> {
         if self.labels.is_empty() {
             return Err(DataClassificationError::NoLabels);
+        }
+
+        // Serve from the cache when this content has been classified before. The cache holds real
+        // LLM results only (fail-mode substitution happens above this layer), so a hit is genuine.
+        let key = cache_key(content);
+        if let Some(hit) = self
+            .cache
+            .lock()
+            .expect("ifc cache lock poisoned")
+            .get(&key)
+            .cloned()
+        {
+            tracing::debug!(len = content.len(), "ifc classification cache hit");
+            return Ok(hit);
         }
 
         // Run each label's LLM call concurrently with a bounded in-flight cap; `buffered` keeps
@@ -219,10 +249,15 @@ impl DataModel {
             }
         }
 
-        Ok(SensitivityClassification {
+        let classification = SensitivityClassification {
             is_public: findings.is_empty(),
             findings,
-        })
+        };
+        self.cache
+            .lock()
+            .expect("ifc cache lock poisoned")
+            .put(key, classification.clone());
+        Ok(classification)
     }
 
     /// Get the configured label templates.
@@ -369,5 +404,35 @@ mod tests {
         assert_eq!(model.labels().len(), 1);
         assert_eq!(model.model(), "claude-haiku-4-5");
         assert_eq!(model.provider(), Provider::Anthropic);
+    }
+
+    #[tokio::test]
+    async fn classify_serves_cached_result_without_calling_the_llm() {
+        // No api key, so the client is None and a cache MISS would error. Seeding the cache and
+        // getting a successful result proves the hit path short-circuits the LLM.
+        let config = DataModelConfig::from(LlmConfig::default());
+        let model = DataModel::with_config(
+            vec![LabelTemplate::new("L").category(Label::Public, "Public.")],
+            config,
+        );
+
+        let cached = SensitivityClassification {
+            is_public: false,
+            findings: vec![SensitivityFinding {
+                label: Label::HighlyConfidential,
+                description: "from cache".into(),
+            }],
+        };
+        let key = cache_key("the same content twice");
+        model
+            .cache
+            .lock()
+            .unwrap()
+            .put(key, cached.clone());
+
+        let result = model.classify("the same content twice").await.unwrap();
+        assert!(!result.is_public);
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(result.findings[0].label, Label::HighlyConfidential);
     }
 }

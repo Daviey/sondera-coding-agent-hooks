@@ -15,15 +15,26 @@ use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
 use sondera_llm::{LlmClient, LlmConfig};
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
 use tracing::instrument;
 use futures::stream::StreamExt;
+use lru::LruCache;
+use sha2::{Digest, Sha256};
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
 
 pub use sondera_llm::Provider;
+
+/// Maximum number of cached evaluations kept in memory (LRU), keyed by content SHA-256 digest.
+const CACHE_CAPACITY: usize = 1024;
+
+/// SHA-256 digest of the content, used as the cache key.
+fn cache_key(content: &str) -> [u8; 32] {
+    Sha256::digest(content.as_bytes()).into()
+}
 
 // ---------------------------------------------------------------------------
 // Structured output from the policy model
@@ -229,6 +240,7 @@ pub struct PolicyModel {
     client: Option<LlmClient>,
     config: PolicyModelConfig,
     policies: Vec<PolicyTemplate>,
+    cache: Mutex<LruCache<[u8; 32], PolicyClassification>>,
 }
 
 impl PolicyModel {
@@ -247,6 +259,7 @@ impl PolicyModel {
             client,
             config,
             policies,
+            cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(CACHE_CAPACITY).unwrap())),
         }
     }
 
@@ -267,6 +280,20 @@ impl PolicyModel {
             return Err(PolicyError::InvalidContent(
                 "Content cannot be empty".into(),
             ));
+        }
+
+        // Serve from the cache when this content has been evaluated before. The cache holds real
+        // LLM results only, so a hit is genuine.
+        let key = cache_key(content);
+        if let Some(hit) = self
+            .cache
+            .lock()
+            .expect("policy cache lock poisoned")
+            .get(&key)
+            .cloned()
+        {
+            tracing::debug!(len = content.len(), "policy evaluation cache hit");
+            return Ok(hit);
         }
 
         // Run each policy's LLM call concurrently with a bounded in-flight cap; `buffered` keeps
@@ -300,10 +327,15 @@ impl PolicyModel {
             }
         }
 
-        Ok(PolicyClassification {
+        let classification = PolicyClassification {
             compliant: violations.is_empty(),
             violations,
-        })
+        };
+        self.cache
+            .lock()
+            .expect("policy cache lock poisoned")
+            .put(key, classification.clone());
+        Ok(classification)
     }
 
     /// Evaluate a conversation history against all configured policy templates.

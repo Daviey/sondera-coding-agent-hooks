@@ -2292,6 +2292,8 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -3246,6 +3248,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
 dependencies = [
  "logos-codegen 0.16.1",
+]
+
+[[package]]
+name = "lru"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+dependencies = [
+ "hashbrown 0.15.5",
 ]
 
 [[package]]
@@ -5437,9 +5448,11 @@ name = "sondera-information-flow-control"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "lru",
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "sha2",
  "sondera-llm",
  "strum 0.27.2",
  "strum_macros 0.27.2",
@@ -5499,9 +5512,11 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "futures",
+ "lru",
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "sha2",
  "sondera-llm",
  "strum 0.27.2",
  "strum_macros 0.27.2",
