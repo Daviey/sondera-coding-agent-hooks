@@ -5481,6 +5481,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sondera-opencode"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sondera-config",
+ "sondera-harness",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "sondera-policy"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,21 @@
+[package]
+name = "sondera-opencode"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "opencode adapter for the Sondera harness (Cedar policy enforcement)"
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sondera-opencode-adapter"
+path = "src/main.rs"
+
+[dependencies]
+sondera-harness = { workspace = true }
+sondera-config = { workspace = true }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "signal", "time"] }
+uuid = { version = "1.0", features = ["v4"] }

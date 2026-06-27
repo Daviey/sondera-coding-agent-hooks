@@ -23,6 +23,10 @@ cargo run -p sondera-claude -- uninstall --user   # remove, same scope
 
 Cursor, Copilot, and Gemini follow the same pattern (`sondera-cursor`, `sondera-copilot`, `sondera-gemini`), each writing to its own settings location. The installer backs up the existing settings file before writing, so uninstall or rollback is straightforward.
 
+### opencode
+
+opencode differs from the others: its plugin system is JavaScript, so the opencode integration is split. The Rust adapter lives in-tree at `apps/opencode` (binary `sondera-opencode-adapter`); the TypeScript plugin that opencode loads is distributed separately via npm. The plugin spawns the adapter as a subprocess and talks to it over stdin/stdout (one JSON per request in `adjudicate` mode, or NDJSON in `stream` mode). The adapter normalizes opencode tool calls to the same Sondera actions and connects to the harness socket (`SONDERA_SOCKET`, or the default). It fails open by default; the plugin's strict mode flips that. See the adapter's `--help` and the plugin's README for the opencode-side install.
+
 The installer finds the binary on `PATH`, then falls back to `~/.cargo/bin`, `/usr/local/bin`, and `/usr/bin`. Install the binary first (`cargo install --path apps/claude`, or your package manager) so the installer can locate it.
 
 ## The lifecycle events

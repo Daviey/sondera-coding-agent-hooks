@@ -24,7 +24,7 @@ On Debian or Fedora, install `libssl-dev` / `pkg-config` (or `openssl-devel` / `
 | `crates/guardrails/ifc` | data-sensitivity (IFC) classifier |
 | `crates/guardrails/policy` | secure-code policy classifier |
 | `crates/mcp` | MCP server for Cedar policy authoring |
-| `apps/claude`, `apps/cursor`, `apps/copilot`, `apps/gemini` | per-agent hook adapters |
+| `apps/claude`, `apps/cursor`, `apps/copilot`, `apps/gemini`, `apps/opencode` | per-agent hook adapters |
 
 ## Build and test
 
