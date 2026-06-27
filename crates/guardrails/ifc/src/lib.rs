@@ -68,9 +68,15 @@ pub struct DataModelConfig {
 
 impl Default for DataModelConfig {
     fn default() -> Self {
-        Self {
-            llm: LlmConfig::from_env(),
+        let mut llm = LlmConfig::from_env();
+        // Per-classifier model override: IFC can run a cheaper/faster model than policy.
+        if let Some(model) = std::env::var("SONDERA_IFC_MODEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            llm.model = model;
         }
+        Self { llm }
     }
 }
 

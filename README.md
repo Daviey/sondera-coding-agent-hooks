@@ -30,7 +30,8 @@ cargo --version
 
 The YARA signature engine and Cedar policies work without any external
 dependencies. The LLM-based classifiers (data sensitivity and secure code
-policy) support multiple providers, selected via `~/.sondera/env`:
+policy) support multiple providers, selected via `~/.sondera/env`. See
+[docs/configuration.md](docs/configuration.md) for the full reference; the common options:
 
 | `SONDERA_PROVIDER` | Auth                                              | Notes                                            |
 |--------------------|---------------------------------------------------|--------------------------------------------------|
