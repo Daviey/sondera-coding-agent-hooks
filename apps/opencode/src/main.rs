@@ -377,7 +377,10 @@ mod tests {
 
     #[test]
     fn shell_command_extracts_command() {
-        let req = make_req("ShellCommand", serde_json::json!({"command": "ls -la /tmp"}));
+        let req = make_req(
+            "ShellCommand",
+            serde_json::json!({"command": "ls -la /tmp"}),
+        );
         let action = build_action(&req);
         match action {
             Action::ShellCommand(cmd) => {
@@ -466,7 +469,10 @@ mod tests {
 
     #[test]
     fn web_fetch_extracts_url() {
-        let req = make_req("WebFetch", serde_json::json!({"url": "https://example.com"}));
+        let req = make_req(
+            "WebFetch",
+            serde_json::json!({"url": "https://example.com"}),
+        );
         let action = build_action(&req);
         match action {
             Action::WebFetch(wf) => assert_eq!(wf.url, "https://example.com"),

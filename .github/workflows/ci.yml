@@ -110,13 +110,14 @@ jobs:
             -p sondera-copilot \
             -p sondera-cursor \
             -p sondera-gemini \
+            -p sondera-opencode \
             -p sondera-harness
 
       - name: Create archive
         run: |
           tar -czvf sondera-${{ matrix.target }}.tar.gz \
             -C target/${{ matrix.target }}/release \
-            sondera-claude sondera-copilot sondera-cursor sondera-gemini sondera-harness-server
+            sondera-claude sondera-copilot sondera-cursor sondera-gemini sondera-opencode-adapter sondera-harness-server
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

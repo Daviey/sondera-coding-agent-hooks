@@ -69,7 +69,9 @@ async fn openai_sends_strict_json_schema() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
-        .respond_with(chat_completion(r#"{"violation":0,"policy_category":"none"}"#))
+        .respond_with(chat_completion(
+            r#"{"violation":0,"policy_category":"none"}"#,
+        ))
         .mount(&server)
         .await;
 
@@ -101,7 +103,9 @@ async fn openai_sends_bearer_auth() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
-        .respond_with(chat_completion(r#"{"violation":0,"policy_category":"none"}"#))
+        .respond_with(chat_completion(
+            r#"{"violation":0,"policy_category":"none"}"#,
+        ))
         .mount(&server)
         .await;
 
@@ -122,7 +126,9 @@ async fn zai_falls_back_to_json_object_with_schema_in_prompt() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
-        .respond_with(chat_completion(r#"{"violation":0,"policy_category":"none"}"#))
+        .respond_with(chat_completion(
+            r#"{"violation":0,"policy_category":"none"}"#,
+        ))
         .mount(&server)
         .await;
 
@@ -139,8 +145,14 @@ async fn zai_falls_back_to_json_object_with_schema_in_prompt() {
     );
     // The fallback injects the schema into the system message.
     let system = body["messages"][0]["content"].as_str().unwrap();
-    assert!(system.contains("JSON SCHEMA"), "system prompt should describe the schema");
-    assert!(system.contains("violation"), "schema text should include the result fields");
+    assert!(
+        system.contains("JSON SCHEMA"),
+        "system prompt should describe the schema"
+    );
+    assert!(
+        system.contains("violation"),
+        "schema text should include the result fields"
+    );
 }
 
 #[tokio::test]
@@ -148,7 +160,9 @@ async fn ollama_sends_no_auth_header() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
-        .respond_with(chat_completion(r#"{"violation":0,"policy_category":"none"}"#))
+        .respond_with(chat_completion(
+            r#"{"violation":0,"policy_category":"none"}"#,
+        ))
         .mount(&server)
         .await;
 
@@ -269,13 +283,19 @@ async fn retries_on_transient_429() {
         .await
         .expect_err("should error after retries");
 
-    assert!(matches!(err, LlmError::Api { status: 429, .. }), "got {err:?}");
+    assert!(
+        matches!(err, LlmError::Api { status: 429, .. }),
+        "got {err:?}"
+    );
     let attempts = server
         .received_requests()
         .await
         .expect("requests recorded")
         .len();
-    assert_eq!(attempts, 3, "should make MAX_ATTEMPTS (3) attempts before giving up");
+    assert_eq!(
+        attempts, 3,
+        "should make MAX_ATTEMPTS (3) attempts before giving up"
+    );
 }
 
 #[tokio::test]

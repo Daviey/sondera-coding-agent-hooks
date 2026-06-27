@@ -456,8 +456,8 @@ impl Harness for CedarPolicyHarness {
                     fail_mode = ?self.fail_mode,
                     "classifier unavailable under fail-closed-hard; denying action outright"
                 );
-                let adjudicated = Adjudicated::deny()
-                    .with_reason("classifier unavailable (fail-closed-hard)");
+                let adjudicated =
+                    Adjudicated::deny().with_reason("classifier unavailable (fail-closed-hard)");
                 let raw = serde_json::json!({
                     "hard_deny": true,
                     "reason": "classifier unavailable in fail-closed-hard mode",
@@ -518,8 +518,16 @@ mod fail_mode_tests {
         assert_eq!(FailMode::parse("HARD"), FailMode::ClosedHard);
         assert_eq!(FailMode::parse("deny-hard"), FailMode::ClosedHard);
         assert_eq!(FailMode::parse("open"), FailMode::Open);
-        assert_eq!(FailMode::parse(""), FailMode::Open, "empty defaults to open");
-        assert_eq!(FailMode::parse("garbage"), FailMode::Open, "unknown defaults to open");
+        assert_eq!(
+            FailMode::parse(""),
+            FailMode::Open,
+            "empty defaults to open"
+        );
+        assert_eq!(
+            FailMode::parse("garbage"),
+            FailMode::Open,
+            "unknown defaults to open"
+        );
     }
 
     #[test]
@@ -541,10 +549,7 @@ mod fail_mode_tests {
         let closed = default_classification_for(FailMode::Closed);
         assert!(!closed.compliant, "fail-closed must be non-compliant");
         assert!(
-            closed
-                .violations
-                .iter()
-                .any(|v| v.rule == "FAIL_CLOSED"),
+            closed.violations.iter().any(|v| v.rule == "FAIL_CLOSED"),
             "fail-closed must carry a synthetic FAIL_CLOSED violation"
         );
     }

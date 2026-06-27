@@ -50,7 +50,12 @@ impl VertexCompleter {
                 config.provider
             )));
         }
-        if config.vertex_project.as_deref().unwrap_or_default().is_empty() {
+        if config
+            .vertex_project
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty()
+        {
             return Err(LlmError::NotConfigured(
                 "VERTEX_PROJECT is not set (required for the Vertex provider)".into(),
             ));
@@ -156,7 +161,8 @@ impl VertexCompleter {
             .get_or_try_init(|| async {
                 let project = self.config.vertex_project.as_deref().unwrap_or_default();
                 let bearer = format!("Bearer {}", self.bearer_token().await?);
-                let url = format!("https://cloudresourcemanager.googleapis.com/v1/projects/{project}");
+                let url =
+                    format!("https://cloudresourcemanager.googleapis.com/v1/projects/{project}");
                 let resp = self.http.get(url).bearer_auth(bearer).send().await?;
                 let status = resp.status();
                 if !status.is_success() {
@@ -317,6 +323,9 @@ mod tests {
             .await
             .expect("live Vertex call should succeed");
         let result: SafetyResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.violation, 0, "a benign greeting should not be a violation");
+        assert_eq!(
+            result.violation, 0,
+            "a benign greeting should not be a violation"
+        );
     }
 }

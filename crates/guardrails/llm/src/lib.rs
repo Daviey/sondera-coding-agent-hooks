@@ -180,7 +180,8 @@ impl Provider {
 
     /// Parse a provider name from a case-insensitive string.
     pub fn parse(name: &str) -> Result<Self, LlmError> {
-        match name.trim().to_ascii_lowercase().as_str() {            "anthropic" | "claude" => Ok(Provider::Anthropic),
+        match name.trim().to_ascii_lowercase().as_str() {
+            "anthropic" | "claude" => Ok(Provider::Anthropic),
             "openai" | "openai-compatible" => Ok(Provider::Openai),
             "ollama" => Ok(Provider::Ollama),
             "vertex" | "gcp" => Ok(Provider::Vertex),
@@ -251,18 +252,14 @@ impl LlmConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
 
-        let base_url = env::var("SONDERA_BASE_URL")
-            .ok()
-            .filter(|s| !s.is_empty());
+        let base_url = env::var("SONDERA_BASE_URL").ok().filter(|s| !s.is_empty());
 
         let api_key = provider
             .api_key_env()
             .and_then(|name| env::var(name).ok())
             .filter(|s| !s.is_empty());
 
-        let vertex_project = env::var("VERTEX_PROJECT")
-            .ok()
-            .filter(|s| !s.is_empty());
+        let vertex_project = env::var("VERTEX_PROJECT").ok().filter(|s| !s.is_empty());
 
         let vertex_location = env::var("VERTEX_LOCATION")
             .ok()
@@ -443,10 +440,7 @@ impl LlmClient {
 /// not block other requests.
 fn is_provider_failure(error: &LlmError) -> bool {
     match error {
-        LlmError::Timeout
-        | LlmError::Http(_)
-        | LlmError::Auth(_)
-        | LlmError::CircuitOpen => true,
+        LlmError::Timeout | LlmError::Http(_) | LlmError::Auth(_) | LlmError::CircuitOpen => true,
         LlmError::Api { .. } => true, // 4xx/5xx from the provider counts
         LlmError::NotConfigured(_)
         | LlmError::Refusal
@@ -729,7 +723,9 @@ mod tests {
             message: "x".into()
         }));
         assert!(!is_provider_failure(&LlmError::NoContent));
-        assert!(!is_provider_failure(&LlmError::Parse(serde_json::from_str::<i64>("x").unwrap_err())));
+        assert!(!is_provider_failure(&LlmError::Parse(
+            serde_json::from_str::<i64>("x").unwrap_err()
+        )));
         assert!(!is_provider_failure(&LlmError::Refusal));
     }
 }

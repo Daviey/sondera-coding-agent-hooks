@@ -11,8 +11,11 @@
 
 mod policy;
 
+use futures::stream::StreamExt;
+use lru::LruCache;
 use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sondera_llm::{LlmClient, LlmConfig};
 use std::path::Path;
 use std::sync::Mutex;
@@ -20,9 +23,6 @@ use std::time::Duration;
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
 use tracing::instrument;
-use futures::stream::StreamExt;
-use lru::LruCache;
-use sha2::{Digest, Sha256};
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
 
@@ -259,7 +259,9 @@ impl PolicyModel {
             client,
             config,
             policies,
-            cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(CACHE_CAPACITY).unwrap())),
+            cache: Mutex::new(LruCache::new(
+                std::num::NonZeroUsize::new(CACHE_CAPACITY).unwrap(),
+            )),
         }
     }
 

@@ -294,7 +294,8 @@ mod tests {
             a: String,
             b: Option<u8>,
         }
-        let mut schema = harden_schema(serde_json::to_value(schemars::schema_for!(WithOptional)).unwrap());
+        let mut schema =
+            harden_schema(serde_json::to_value(schemars::schema_for!(WithOptional)).unwrap());
         // schemars omits `b` from required (it's Option); OpenAI strict needs it present.
         schema = ensure_all_properties_required(schema);
         let required = schema

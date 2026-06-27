@@ -189,7 +189,9 @@ impl DataModel {
             client,
             config,
             labels,
-            cache: Mutex::new(LruCache::new(std::num::NonZeroUsize::new(CACHE_CAPACITY).unwrap())),
+            cache: Mutex::new(LruCache::new(
+                std::num::NonZeroUsize::new(CACHE_CAPACITY).unwrap(),
+            )),
         }
     }
 
@@ -424,11 +426,7 @@ mod tests {
             }],
         };
         let key = cache_key("the same content twice");
-        model
-            .cache
-            .lock()
-            .unwrap()
-            .put(key, cached.clone());
+        model.cache.lock().unwrap().put(key, cached.clone());
 
         let result = model.classify("the same content twice").await.unwrap();
         assert!(!result.is_public);

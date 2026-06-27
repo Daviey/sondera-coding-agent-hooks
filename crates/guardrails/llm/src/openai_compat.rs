@@ -34,7 +34,10 @@ impl OpenAiCompatCompleter {
     /// Build a client. A bearer key is required for OpenAI and z.ai; Ollama needs none.
     pub fn new(config: LlmConfig) -> Result<Self, LlmError> {
         let provider = config.provider;
-        if !matches!(provider, Provider::Openai | Provider::Ollama | Provider::Zai) {
+        if !matches!(
+            provider,
+            Provider::Openai | Provider::Ollama | Provider::Zai
+        ) {
             return Err(LlmError::NotConfigured(format!(
                 "OpenAiCompatCompleter does not serve provider {provider:?}"
             )));
@@ -42,10 +45,14 @@ impl OpenAiCompatCompleter {
         let api_key = match provider {
             Provider::Ollama => None,
             Provider::Openai | Provider::Zai => {
-                let key = config.api_key.clone().filter(|k| !k.is_empty()).ok_or_else(|| {
-                    let env = provider.api_key_env().unwrap_or("API_KEY");
-                    LlmError::NotConfigured(format!("{} is not set", env))
-                })?;
+                let key = config
+                    .api_key
+                    .clone()
+                    .filter(|k| !k.is_empty())
+                    .ok_or_else(|| {
+                        let env = provider.api_key_env().unwrap_or("API_KEY");
+                        LlmError::NotConfigured(format!("{} is not set", env))
+                    })?;
                 Some(key)
             }
             _ => unreachable!(),
@@ -332,8 +339,8 @@ mod tests {
                 api_key: None,
                 vertex_project: None,
                 vertex_location: None,
-            vertex_endpoint_id: None,
-            vertex_project_number: None,
+                vertex_endpoint_id: None,
+                vertex_project_number: None,
             }
         };
         assert!(OpenAiCompatCompleter::new(with_key).is_ok());
