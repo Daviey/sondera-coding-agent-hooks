@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::debug;
 
+use crate::schema::{ensure_all_properties_required, harden_schema};
 use crate::{LlmConfig, LlmError, Provider};
 
 /// Output cap for a classification reply (generous for the small structured objects returned).
@@ -83,6 +84,7 @@ impl OpenAiCompatCompleter {
             system,
             user,
             schema,
+            self.provider.supports_strict_json_schema(),
         );
         debug!(url = %url, model = %self.config.model, provider = ?self.provider, "openai-compat request");
         let bearer = self.api_key.as_ref().map(|k| format!("Bearer {k}"));
@@ -90,38 +92,57 @@ impl OpenAiCompatCompleter {
     }
 }
 
-/// Build a Chat Completions request body that asks for JSON-mode output conforming to `schema`.
+/// Build a Chat Completions request body that asks for JSON output conforming to `schema`.
 ///
-/// The caller's system prompt is augmented with the JSON schema and a strict "JSON only"
-/// instruction. `response_format: json_object` guarantees valid JSON from the API; schema
-/// conformance is enforced by describing the schema in the prompt and by deserializing the reply
-/// into a concrete type on the caller side.
+/// When `strict` is true the body uses OpenAI Structured Outputs / vLLM guided decoding
+/// (`response_format: { type: "json_schema", json_schema: { schema, strict: true } }`) with a
+/// hardened schema, so the API guarantees schema-conformant JSON. When false it falls back to
+/// `json_object` mode with the schema described in the system prompt — schema conformance is then
+/// only enforced by deserializing the reply into a concrete type on the caller side.
 pub(crate) fn build_json_object_body(
     model: &str,
     temperature: f32,
     system: &str,
     user: &str,
     schema: Value,
+    strict: bool,
 ) -> Value {
-    let schema_text = serde_json::to_string_pretty(&schema)
-        .expect("schema serialization is infallible for a valid Value");
-    let instructed = format!(
-        "{system}\n\n\
-         Respond with a single JSON object that strictly conforms to the following JSON \
-         Schema. Output ONLY valid minified JSON — no prose, no code fences, no commentary.\n\
-         JSON SCHEMA:\n{schema_text}"
-    );
+    if strict {
+        let schema = ensure_all_properties_required(harden_schema(schema));
+        json!({
+            "model": model,
+            "max_tokens": MAX_TOKENS,
+            "temperature": temperature,
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": user },
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": { "name": "result", "strict": true, "schema": schema }
+            },
+        })
+    } else {
+        let schema_text = serde_json::to_string_pretty(&schema)
+            .expect("schema serialization is infallible for a valid Value");
+        let instructed = format!(
+            "{system}\n\n\
+             Respond with a single JSON object that strictly conforms to the following JSON \
+             Schema. Output ONLY valid minified JSON — no prose, no code fences, no commentary.\n\
+             JSON SCHEMA:\n{schema_text}"
+        );
 
-    json!({
-        "model": model,
-        "max_tokens": MAX_TOKENS,
-        "temperature": temperature,
-        "messages": [
-            { "role": "system", "content": instructed },
-            { "role": "user", "content": user },
-        ],
-        "response_format": { "type": "json_object" },
-    })
+        json!({
+            "model": model,
+            "max_tokens": MAX_TOKENS,
+            "temperature": temperature,
+            "messages": [
+                { "role": "system", "content": instructed },
+                { "role": "user", "content": user },
+            ],
+            "response_format": { "type": "json_object" },
+        })
+    }
 }
 
 /// POST a built Chat Completions body to `url` and parse the first choice's content as JSON.

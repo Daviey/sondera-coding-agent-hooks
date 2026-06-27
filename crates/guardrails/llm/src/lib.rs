@@ -43,6 +43,7 @@
 
 mod anthropic;
 mod openai_compat;
+mod schema;
 mod vertex;
 
 use std::env;
@@ -157,10 +158,24 @@ impl Provider {
         }
     }
 
+    /// Whether the provider's Chat Completions API supports OpenAI-style strict structured output
+    /// (`response_format: { type: "json_schema", json_schema: { schema, strict: true } }`). When
+    /// true the OpenAI-compat backends request schema-validated JSON; otherwise they fall back to
+    /// `json_object` mode with the schema described in the prompt.
+    ///
+    /// - OpenAI: Structured Outputs (Aug 2024) on supported models.
+    /// - Vertex: the first-party OpenAI shim and vLLM model-garden deployments (guided decoding).
+    /// - Ollama: left off conservatively (OpenAI-compat json_schema support varies by version);
+    ///   set `SONDERA_BASE_URL`/a custom path if you know your server supports it.
+    /// - z.ai: `response_format` only supports `text`/`json_object`.
+    /// - Anthropic uses its own structured-output mechanism (not this flag).
+    pub fn supports_strict_json_schema(self) -> bool {
+        matches!(self, Provider::Openai | Provider::Vertex)
+    }
+
     /// Parse a provider name from a case-insensitive string.
     pub fn parse(name: &str) -> Result<Self, LlmError> {
-        match name.trim().to_ascii_lowercase().as_str() {
-            "anthropic" | "claude" => Ok(Provider::Anthropic),
+        match name.trim().to_ascii_lowercase().as_str() {            "anthropic" | "claude" => Ok(Provider::Anthropic),
             "openai" | "openai-compatible" => Ok(Provider::Openai),
             "ollama" => Ok(Provider::Ollama),
             "vertex" | "gcp" => Ok(Provider::Vertex),

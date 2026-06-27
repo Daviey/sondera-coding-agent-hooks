@@ -89,6 +89,7 @@ impl VertexCompleter {
             system,
             user,
             schema,
+            true, // Vertex (first-party shim and vLLM) supports strict json_schema
         );
         debug!(url = %url, model = %self.config.model, "vertex request");
         send_and_parse(&self.http, &url, &body, Some(&bearer), timeout).await
