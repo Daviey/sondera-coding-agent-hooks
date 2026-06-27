@@ -250,3 +250,69 @@ async fn anthropic_sends_structured_output_config_and_api_key() {
     assert_eq!(schema["additionalProperties"].as_bool(), Some(false));
     assert!(schema.get("$defs").is_none());
 }
+
+#[tokio::test]
+async fn retries_on_transient_429() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .set_body_json(serde_json::json!({ "error": { "message": "slow down" } })),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client(Provider::Openai, &server, Some("sk-test"));
+    let err = client
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .await
+        .expect_err("should error after retries");
+
+    assert!(matches!(err, LlmError::Api { status: 429, .. }), "got {err:?}");
+    let attempts = server
+        .received_requests()
+        .await
+        .expect("requests recorded")
+        .len();
+    assert_eq!(attempts, 3, "should make MAX_ATTEMPTS (3) attempts before giving up");
+}
+
+#[tokio::test]
+async fn lenient_parse_strips_code_fence() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(chat_completion(
+            "```json\n{\"violation\":1,\"policy_category\":\"SC2\"}\n```",
+        ))
+        .mount(&server)
+        .await;
+
+    let client = client(Provider::Zai, &server, Some("zai-key"));
+    let value = client
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .await
+        .expect("fenced JSON should parse leniently");
+    assert_eq!(value.violation, 1);
+    assert_eq!(value.policy_category, "SC2");
+}
+
+#[tokio::test]
+async fn lenient_parse_extracts_json_from_prose() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(chat_completion(
+            "Sure! Here is the verdict: {\"violation\":0,\"policy_category\":\"none\"} — hope that helps.",
+        ))
+        .mount(&server)
+        .await;
+
+    let client = client(Provider::Zai, &server, Some("zai-key"));
+    let value = client
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .await
+        .expect("prose-wrapped JSON should parse leniently");
+    assert_eq!(value.violation, 0);
+}

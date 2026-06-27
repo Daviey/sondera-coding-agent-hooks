@@ -412,6 +412,99 @@ pub fn schema_for<T: JsonSchema>() -> Value {
         .expect("schemars schema generation is infallible for supported types")
 }
 
+// ---------------------------------------------------------------------------
+// Shared HTTP helpers (retry + lenient JSON parse)
+// ---------------------------------------------------------------------------
+
+/// Maximum number of attempts for a single request, including the first.
+const MAX_ATTEMPTS: u8 = 3;
+
+/// Whether an HTTP status is worth retrying (rate-limiting or a transient server fault).
+fn is_transient(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+/// Send a request built fresh by `build` on each attempt, retrying transient failures
+/// (network timeouts/connect errors, 429, 5xx) with exponential backoff. The `Retry-After`
+/// header is honored when the server provides it. Non-transient errors (4xx other than 429) and
+/// the final response after exhausting retries are returned to the caller to interpret.
+pub(crate) async fn send_with_retry<F>(
+    build: F,
+    per_attempt_timeout: Duration,
+) -> Result<reqwest::Response, LlmError>
+where
+    F: Fn() -> reqwest::RequestBuilder,
+{
+    let mut backoff = Duration::from_millis(150);
+    for attempt in 1..=MAX_ATTEMPTS {
+        match build().timeout(per_attempt_timeout).send().await {
+            Err(error) => {
+                let retryable = error.is_timeout() || error.is_connect() || error.is_request();
+                if attempt < MAX_ATTEMPTS && retryable {
+                    tracing::debug!(attempt, error = %error, "transient transport error, retrying");
+                    tokio::time::sleep(backoff).await;
+                    backoff = backoff.saturating_mul(3);
+                    continue;
+                }
+                return Err(error.into());
+            }
+            Ok(response) if attempt < MAX_ATTEMPTS && is_transient(response.status()) => {
+                // Honor Retry-After (seconds) on 429 if present, capped to keep latency bounded.
+                if let Some(wait) = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                {
+                    backoff = Duration::from_secs(wait.min(30));
+                }
+                tracing::debug!(
+                    attempt,
+                    status = %response.status(),
+                    "transient API error, retrying"
+                );
+                drop(response);
+                tokio::time::sleep(backoff).await;
+                backoff = backoff.saturating_mul(3);
+                continue;
+            }
+            Ok(response) => return Ok(response),
+        }
+    }
+    unreachable!("loop returns on success, a non-transient response, or error")
+}
+
+/// Parse JSON leniently: try the text directly, then with ``` fences stripped, then the substring
+/// from the first `{` to the last `}`. The strict backends return clean JSON; this only rescues
+/// the `json_object` fallback path when a model wraps its output in prose or a code fence.
+pub(crate) fn parse_lenient_json(text: &str) -> Result<Value, serde_json::Error> {
+    let trimmed = text.trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Ok(value);
+    }
+    // Strip a ```json / ``` fence wrapper.
+    let fenceless = trimmed
+        .strip_prefix("```")
+        .map(|t| {
+            let t = t.strip_prefix("json").unwrap_or(t);
+            t.strip_suffix("```").unwrap_or(t)
+        })
+        .map(|t| t.trim())
+        .unwrap_or(trimmed);
+    if let Ok(value) = serde_json::from_str::<Value>(fenceless) {
+        return Ok(value);
+    }
+    // Fall back to the outermost {...} span.
+    let Some(start) = text.find('{') else {
+        return serde_json::from_str::<Value>(trimmed);
+    };
+    let Some(end) = text.rfind('}') else {
+        return serde_json::from_str::<Value>(trimmed);
+    };
+    let span = &text[start..=end];
+    serde_json::from_str(span)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

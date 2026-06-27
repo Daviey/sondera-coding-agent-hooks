@@ -79,23 +79,19 @@ impl AnthropicCompleter {
         let url = format!("{}/v1/messages", self.config.effective_base_url());
         debug!(url = %url, model = %self.config.model, "anthropic request");
 
-        let response = self
-            .http
-            .post(url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
-            .timeout(timeout)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    LlmError::Timeout
-                } else {
-                    LlmError::Http(e.to_string())
-                }
-            })?;
+        let http = &self.http;
+        let api_key = &self.api_key;
+        let response = crate::send_with_retry(
+            || {
+                http.post(&url)
+                    .header("x-api-key", api_key)
+                    .header("anthropic-version", ANTHROPIC_VERSION)
+                    .header("content-type", "application/json")
+                    .json(&body)
+            },
+            timeout,
+        )
+        .await?;
 
         let status = response.status();
         if !status.is_success() {
@@ -123,7 +119,7 @@ impl AnthropicCompleter {
             })
             .ok_or(LlmError::NoContent)?;
 
-        Ok(serde_json::from_str(&text)?)
+        Ok(crate::parse_lenient_json(&text)?)
     }
 }
 

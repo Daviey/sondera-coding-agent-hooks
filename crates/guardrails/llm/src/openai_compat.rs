@@ -156,22 +156,17 @@ pub(crate) async fn send_and_parse(
     bearer: Option<&str>,
     timeout: Duration,
 ) -> Result<Value, LlmError> {
-    let mut request = http
-        .post(url)
-        .header("content-type", "application/json")
-        .timeout(timeout)
-        .json(body);
-    if let Some(value) = bearer {
-        request = request.header("authorization", value);
-    }
-
-    let response = request.send().await.map_err(|e| {
-        if e.is_timeout() {
-            LlmError::Timeout
-        } else {
-            LlmError::Http(e.to_string())
+    let build = || {
+        let mut request = http
+            .post(url)
+            .header("content-type", "application/json")
+            .json(body);
+        if let Some(value) = bearer {
+            request = request.header("authorization", value);
         }
-    })?;
+        request
+    };
+    let response = crate::send_with_retry(build, timeout).await?;
 
     let status = response.status();
     if !status.is_success() {
@@ -200,7 +195,7 @@ pub(crate) async fn send_and_parse(
         .filter(|s| !s.is_empty())
         .ok_or(LlmError::NoContent)?;
 
-    Ok(serde_json::from_str(&text)?)
+    Ok(crate::parse_lenient_json(&text)?)
 }
 
 // ---------------------------------------------------------------------------

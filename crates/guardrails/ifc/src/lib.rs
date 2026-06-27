@@ -185,19 +185,21 @@ impl DataModel {
         }
 
         // Run each label's LLM call concurrently with a bounded in-flight cap; `buffered` keeps
-        // results in label order so findings stay deterministic.
+        // results in label order so findings stay deterministic. Index into the vec inside the
+        // future (rather than capturing the per-item reference) so every future shares `&self`'s
+        // single lifetime — required for `buffered` under a `Send` future bound.
         const CONCURRENCY: usize = 8;
-        let results: Vec<SensitivityModelResult> = futures::stream::iter(self.labels.iter())
-            .map(|label| self.classify_single(label, content, Duration::from_secs(30)))
-            .buffered(CONCURRENCY)
-            // Surface the first error, matching the original sequential short-circuit.
-            .collect::<Vec<Result<_, _>>>()
-            .await
-            .into_iter()
-            .collect::<Result<_, _>>()?;
+        let labels = &self.labels;
+        let results: Vec<Result<SensitivityModelResult, DataClassificationError>> =
+            futures::stream::iter(0..labels.len())
+                .map(|i| self.classify_single(&labels[i], content, Duration::from_secs(30)))
+                .buffered(CONCURRENCY)
+                .collect()
+                .await;
 
         let mut findings = Vec::new();
         for (label, result) in self.labels.iter().zip(results.into_iter()) {
+            let result = result?;
             if result.sensitive == 1 {
                 let sensitivity_label = result.sensitivity_category;
                 let description = label

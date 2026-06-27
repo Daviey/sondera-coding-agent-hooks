@@ -264,19 +264,21 @@ impl PolicyModel {
         }
 
         // Run each policy's LLM call concurrently with a bounded in-flight cap; `buffered` keeps
-        // results in policy order so violations stay deterministic.
+        // results in policy order so violations stay deterministic. Index into the vec inside the
+        // future (rather than capturing the per-item reference) so every future shares `&self`'s
+        // single lifetime — required for `buffered` under a `Send` future bound.
         const CONCURRENCY: usize = 8;
-        let results: Vec<PolicyModelResult> = futures::stream::iter(self.policies.iter())
-            .map(|policy| self.evaluate_single(policy, content, Duration::from_secs(30)))
-            .buffered(CONCURRENCY)
-            // Surface the first error, matching the original sequential short-circuit.
-            .collect::<Vec<Result<_, _>>>()
-            .await
-            .into_iter()
-            .collect::<Result<_, _>>()?;
+        let policies = &self.policies;
+        let results: Vec<Result<PolicyModelResult, PolicyError>> =
+            futures::stream::iter(0..policies.len())
+                .map(|i| self.evaluate_single(&policies[i], content, Duration::from_secs(30)))
+                .buffered(CONCURRENCY)
+                .collect()
+                .await;
 
         let mut violations = Vec::new();
         for (policy, result) in self.policies.iter().zip(results.into_iter()) {
+            let result = result?;
             if result.violation == 1 {
                 let code = &result.policy_category;
                 let category_name = policy.category_name(code).unwrap_or_else(|| code.clone());
