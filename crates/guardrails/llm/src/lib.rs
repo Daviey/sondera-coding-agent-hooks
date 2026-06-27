@@ -114,10 +114,11 @@ impl From<reqwest::Error> for LlmError {
 // ---------------------------------------------------------------------------
 
 /// A supported LLM provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     /// Anthropic Messages API (`/v1/messages`). Schema-validated structured output.
+    #[default]
     Anthropic,
     /// OpenAI Chat Completions API. Bearer auth.
     Openai,
@@ -191,12 +192,6 @@ impl Provider {
                 "unknown provider '{other}' (expected anthropic|openai|ollama|vertex|zai)"
             ))),
         }
-    }
-}
-
-impl Default for Provider {
-    fn default() -> Self {
-        Provider::Anthropic
     }
 }
 

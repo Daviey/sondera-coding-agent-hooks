@@ -40,19 +40,21 @@ fn ensure_required_inner(value: &mut Value) {
         Value::Object(map) => {
             let is_object = map.get("type").and_then(Value::as_str) == Some("object");
             if is_object {
-                if let Some(props) = map.get("properties").and_then(Value::as_object) {
-                    let names: Vec<String> = props.keys().cloned().collect();
-                    if !names.is_empty() {
-                        let required = map
-                            .entry("required")
-                            .or_insert_with(|| Value::Array(Vec::new()));
-                        if let Some(arr) = required.as_array_mut() {
-                            for name in names {
-                                let needle = Value::String(name);
-                                if !arr.contains(&needle) {
-                                    arr.push(needle);
-                                }
-                            }
+                // Collect property names first so the immutable borrow of `map` ends before we
+                // mutate `map.entry("required")` below.
+                let names: Vec<String> = map
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .map(|props| props.keys().cloned().collect())
+                    .unwrap_or_default();
+                for name in names {
+                    let required = map
+                        .entry("required")
+                        .or_insert_with(|| Value::Array(Vec::new()));
+                    if let Some(arr) = required.as_array_mut() {
+                        let needle = Value::String(name);
+                        if !arr.contains(&needle) {
+                            arr.push(needle);
                         }
                     }
                 }
@@ -89,17 +91,21 @@ fn inline_refs(schema: &mut Value) {
 fn substitute_refs(value: &mut Value, defs: &Map<String, Value>) {
     match value {
         Value::Object(map) => {
-            if let Some(name) = map
+            // Resolve a `#/$defs/Name` reference into an owned value first, so the borrow of
+            // `map` ends before we assign back into `*value`.
+            let resolved = map
                 .get("$ref")
                 .and_then(Value::as_str)
                 .and_then(|r| r.strip_prefix("#/$defs/"))
-            {
-                if let Some(target) = defs.get(name) {
+                .and_then(|name| defs.get(name))
+                .map(|target| {
                     let mut resolved = target.clone();
                     substitute_refs(&mut resolved, defs);
-                    *value = resolved;
-                    return;
-                }
+                    resolved
+                });
+            if let Some(resolved) = resolved {
+                *value = resolved;
+                return;
             }
             for child in map.values_mut() {
                 substitute_refs(child, defs);
