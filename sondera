@@ -37,8 +37,12 @@ SONDERA="${SONDERA_HOME:-$SCRIPT_DIR}"
   || die "cannot find sondera repo at $SONDERA — set SONDERA_HOME"
 
 POLICIES="$SONDERA/policies"
-BIN="$SONDERA/target/release"
-[[ -d "$BIN" ]] || BIN="$SONDERA/target/debug"
+# Prefer release, fall back to debug — check actual binary existence
+if [[ -x "$SONDERA/target/release/sondera-harness-server" ]]; then
+  BIN="$SONDERA/target/release"
+else
+  BIN="$SONDERA/target/debug"
+fi
 
 SOCKET="${SONDERA_SOCKET:-$HOME/.sondera/sondera-harness.sock}"
 ENV_FILE="$HOME/.sondera/env"
@@ -171,7 +175,7 @@ show_status() {
 install_claude() {
   ensure_binaries
   log "installing claude hooks..."
-  "$BIN/sondera-claude" install --scope user
+  "$BIN/sondera-claude" install --user
   log "done. Run 'sondera start -d' before launching claude."
 }
 
