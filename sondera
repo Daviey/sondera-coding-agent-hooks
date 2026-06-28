@@ -253,9 +253,14 @@ case "$cmd" in
   start)    start_server "${1:-}" ;;
   stop)     stop_server ;;
   restart)  stop_server; start_server -d ;;
-  build)    cd "$SONDERA" && nix-shell -p openssl pkg-config --run \
-              'cargo build --release -p sondera-harness -p sondera-opencode -p sondera-claude -p sondera-benchmark' \
-            && log "release build complete" ;;
+  build)    cd "$SONDERA" && {
+              if command -v nix-shell >/dev/null 2>&1; then
+                nix-shell -p openssl pkg-config --run \
+                  'cargo build --release -p sondera-harness -p sondera-opencode -p sondera-claude -p sondera-benchmark'
+              else
+                cargo build --release -p sondera-harness -p sondera-opencode -p sondera-claude -p sondera-benchmark
+              fi
+            } && log "release build complete" ;;
   status)   show_status ;;
   install)  case "${1:-}" in
               claude)   install_claude ;;
