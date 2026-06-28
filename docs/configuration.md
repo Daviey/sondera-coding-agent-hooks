@@ -94,6 +94,14 @@ The LLM classifiers can fail or be unreachable. `SONDERA_FAIL_MODE` decides what
 
 The server and the hook binaries take `-v` (verbose). Verbose mode sets the filter to `sondera=debug`, which surfaces the per-call observability events the LLM client emits to the `sondera::llm` tracing target: provider, model, latency in milliseconds, and prompt, completion, and total token counts on success, or the error on failure. Without `-v` the filter is `warn`, so only failures and warnings appear.
 
+For a quick snapshot without verbose logs, use the stats subcommand from any adapter binary:
+
+```
+sondera-opencode-adapter stats
+```
+
+This prints event counts (total, allows, denies, errors) and server uptime as JSON.
+
 ## Harness server command line
 
 `sondera-harness-server`:
@@ -175,4 +183,13 @@ VERTEX_LOCATION=europe-west2
 VERTEX_ENDPOINT_ID=<numeric deployed-endpoint id>
 VERTEX_PROJECT_NUMBER=<numeric project number>
 SONDERA_FAIL_MODE=closed-hard
+```
+
+Vertex first-party shim (Gemini and partner models, no deployed endpoint):
+
+```
+SONDERA_PROVIDER=vertex
+SONDERA_MODEL=gemini-2.5-flash
+VERTEX_PROJECT=my-project
+VERTEX_LOCATION=europe-west2
 ```
