@@ -68,6 +68,18 @@ One server instance serves all hook clients that can reach the socket. Put users
 
 Run the server with `-v` for verbose logging. Per-call classifier events land on the `sondera::llm` tracing target with provider, model, latency in milliseconds, and token counts; signature scans and policy decisions log through the `sondera` target. Every event and every adjudication is also persisted to the trajectory store: a JSONL file under the storage directory and a Turso database. Use these for after-the-fact review of what was allowed and denied.
 
+For a live snapshot, query the stats endpoint from any adapter binary:
+
+```
+sondera-opencode-adapter stats
+```
+
+Returns event counts (total, allows, denies, errors) and server uptime. Useful for monitoring dashboards or health checks in deployment scripts.
+
+## Graceful shutdown
+
+The server handles SIGINT (Ctrl-C) and SIGTERM, stops accepting new connections, and removes the socket file before exiting. This lets systemd or process managers restart cleanly without orphaned socket files. In-flight requests are not cancelled; the server waits for them to finish.
+
 ## Updating policies
 
 Cedar policies, the schema, and the TOML templates are loaded at startup. To change them, edit the files under the policy directory (default `policies/`) and restart the server. There is no hot reload.
