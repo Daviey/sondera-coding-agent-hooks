@@ -7,7 +7,8 @@ use crate::storage::entity::EntityStore;
 use crate::storage::file;
 use crate::storage::turso::{TrajectoryStore, get_default_db_path};
 use crate::{
-    Actor, Adjudicated, Agent, Causality, Control, EntityBuilder, Event, TrajectoryEvent, euid,
+    Actor, Adjudicated, Agent, Action, Causality, Control, EntityBuilder, Event, FileOpType,
+    Observation, TrajectoryEvent, euid,
 };
 use anyhow::{Context as AnyhowContext, Result};
 use cedar_policy::{
@@ -16,6 +17,7 @@ use cedar_policy::{
 };
 use sondera_information_flow_control::{DataModel, Label};
 use sondera_policy::{PolicyClassification, PolicyModel, PolicyViolation};
+use sondera_signature::Severity;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tracing::{debug, instrument, warn};
@@ -112,6 +114,134 @@ fn default_classification_for(mode: FailMode) -> PolicyClassification {
     }
 }
 
+/// Which event types receive LLM classification by default.
+///
+/// When `None` (the default, when `SONDERA_LLM_EVENT_TYPES` is unset), all **Action** events
+/// (pre-execution gates) get LLM classification — the historical behaviour. **Observation** events
+/// skip the LLM for latency.
+///
+/// When `Some(set)`, only the listed event types get LLM; others skip unless the YARA trigger
+/// ([`CedarPolicyHarness::yara_triggers`]) fires. This lets an operator trim LLM cost on
+/// low-risk action types (e.g. `FileRead`) while keeping it on high-risk ones.
+///
+/// Type names match the Cedar action identifiers: `ShellCommand`, `WebFetch`, `FileRead`,
+/// `FileWrite`, `FileEdit`, `FileDelete`, `Prompt`, `ShellCommandOutput`, `WebFetchOutput`,
+/// `FileOperationResult`, `ToolOutput`, `PreToolUse`.
+#[derive(Debug, Clone)]
+struct LlmEventFilter(Option<HashSet<String>>);
+
+impl LlmEventFilter {
+    /// Parse a comma-separated list of event type names. Empty or whitespace-only → `None`
+    /// (default: all Actions).
+    fn parse(value: &str) -> Self {
+        let types: HashSet<String> = value
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if types.is_empty() {
+            Self(None)
+        } else {
+            Self(Some(types))
+        }
+    }
+
+    /// Read from `SONDERA_LLM_EVENT_TYPES`. Defaults to `None` (all Actions).
+    fn from_env() -> Self {
+        Self::parse(&std::env::var("SONDERA_LLM_EVENT_TYPES").unwrap_or_default())
+    }
+
+    /// Returns true if this event should get LLM classification by default (before the YARA
+    /// trigger is considered).
+    fn includes(&self, event: &TrajectoryEvent) -> bool {
+        match &self.0 {
+            None => matches!(event, TrajectoryEvent::Action(_)),
+            Some(types) => llm_event_type_name(event)
+                .is_some_and(|name| types.contains(&name.to_ascii_lowercase())),
+        }
+    }
+}
+
+/// Maps an event variant to its Cedar action identifier.
+fn llm_event_type_name(event: &TrajectoryEvent) -> Option<&'static str> {
+    match event {
+        TrajectoryEvent::Action(Action::ShellCommand(_)) => Some("ShellCommand"),
+        TrajectoryEvent::Action(Action::WebFetch(_)) => Some("WebFetch"),
+        TrajectoryEvent::Action(Action::FileOperation(fo)) => Some(match fo.operation {
+            FileOpType::Read => "FileRead",
+            FileOpType::Write => "FileWrite",
+            FileOpType::Edit => "FileEdit",
+            FileOpType::Delete => "FileDelete",
+        }),
+        TrajectoryEvent::Action(Action::ToolCall(_)) => Some("PreToolUse"),
+        TrajectoryEvent::Observation(Observation::Prompt(_)) => Some("Prompt"),
+        TrajectoryEvent::Observation(Observation::ShellCommandOutput(_)) => Some("ShellCommandOutput"),
+        TrajectoryEvent::Observation(Observation::WebFetchOutput(_)) => Some("WebFetchOutput"),
+        TrajectoryEvent::Observation(Observation::FileOperationResult(_)) => Some("FileOperationResult"),
+        TrajectoryEvent::Observation(Observation::ToolOutput(_)) => Some("ToolOutput"),
+        _ => None,
+    }
+}
+
+/// Minimum YARA severity that triggers LLM classification on events that would otherwise skip it.
+///
+/// `None` disables the trigger (YARA matches never force an LLM call). `Some(Low)` (the default)
+/// means any YARA match at or above `Low` severity overrides `skip_llm`.
+type YaraTrigger = Option<Severity>;
+
+/// Parse the YARA trigger threshold from a string. Accepts severity names (`low`, `medium`,
+/// `high`, `critical`) or `off` / `none` / `0` to disable. Defaults to `Low` when unset or
+/// unrecognized.
+fn parse_yara_trigger(value: &str) -> YaraTrigger {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "low" => Some(Severity::Low),
+        "medium" => Some(Severity::Medium),
+        "high" => Some(Severity::High),
+        "critical" => Some(Severity::Critical),
+        "off" | "none" | "0" => None,
+        _ => Some(Severity::Low),
+    }
+}
+
+/// Read the YARA trigger threshold from `SONDERA_LLM_YARA_SEVERITY`. Defaults to `Low`.
+fn yara_trigger_from_env() -> YaraTrigger {
+    parse_yara_trigger(&std::env::var("SONDERA_LLM_YARA_SEVERITY").unwrap_or_default())
+}
+
+/// Extract the primary scannable content from an event for YARA triage.
+///
+/// This is an approximation of what [`transform`](crate::cedar::transform) scans internally —
+/// it covers the dominant content field per event type but does not include resolved file
+/// contents (for `ShellCommand`) or old/new content (for `FileOperation`). Sufficient for the
+/// triage decision of whether to invoke the LLM; the full scan still runs inside `build_request`
+/// for the Cedar context.
+fn primary_content(event: &Event) -> String {
+    match &event.event {
+        TrajectoryEvent::Observation(Observation::Prompt(p)) => p.content.clone(),
+        TrajectoryEvent::Action(Action::ShellCommand(sc)) => sc.command.clone(),
+        TrajectoryEvent::Action(Action::WebFetch(wf)) => format!("{}\n{}", wf.url, wf.prompt),
+        TrajectoryEvent::Action(Action::FileOperation(fo)) => {
+            let mut s = fo.path.clone();
+            if let Some(c) = &fo.content {
+                s.push('\n');
+                s.push_str(c);
+            }
+            s
+        }
+        TrajectoryEvent::Observation(Observation::ShellCommandOutput(sco)) => {
+            format!("{}\n{}", sco.stdout, sco.stderr)
+        }
+        TrajectoryEvent::Observation(Observation::WebFetchOutput(wfo)) => wfo.result.clone(),
+        TrajectoryEvent::Observation(Observation::FileOperationResult(fo)) => {
+            fo.content.clone().unwrap_or_default()
+        }
+        TrajectoryEvent::Observation(Observation::ToolOutput(to)) => {
+            to.output.as_str().map(String::from).unwrap_or_default()
+        }
+        _ => String::new(),
+    }
+}
+
 pub struct CedarPolicyHarness {
     authorizer: Authorizer,
     entity_store: EntityStore,
@@ -121,6 +251,8 @@ pub struct CedarPolicyHarness {
     data_model: DataModel,
     policy_model: PolicyModel,
     fail_mode: FailMode,
+    llm_event_types: LlmEventFilter,
+    yara_trigger: YaraTrigger,
 }
 
 impl CedarPolicyHarness {
@@ -279,6 +411,8 @@ impl CedarPolicyHarness {
             data_model,
             policy_model,
             fail_mode: FailMode::from_env(),
+            llm_event_types: LlmEventFilter::from_env(),
+            yara_trigger: yara_trigger_from_env(),
         })
     }
 
@@ -309,6 +443,15 @@ impl CedarPolicyHarness {
     /// The configured classifier failure mode.
     pub fn fail_mode(&self) -> FailMode {
         self.fail_mode
+    }
+
+    /// Returns true if the given YARA severity meets the trigger threshold, meaning the LLM
+    /// classifiers should run even for events that would otherwise skip them.
+    pub fn yara_triggers(&self, severity: Severity) -> bool {
+        match self.yara_trigger {
+            Some(threshold) => severity >= threshold,
+            None => false,
+        }
     }
 
     /// Classify content sensitivity, substituting a fail-mode default if the IFC classifier
@@ -448,13 +591,15 @@ impl Harness for CedarPolicyHarness {
             return Ok(Adjudicated::allow());
         }
 
-        // Only Action events (pre-execution gates) need the full LLM classifiers.
-        // Observations (post-execution analysis: command output, file contents, prompt text)
-        // skip the LLM for latency — the deterministic YARA scan + Cedar still run, using the
-        // trajectory's existing label. This cuts LLM calls from 3 per tool call to 1.
-        // The flag is passed by value (not shared mutable state) so concurrent adjudicate calls
-        // on the same harness cannot race.
-        let skip_llm = !matches!(event.event, TrajectoryEvent::Action(_));
+        // Determine whether this event type gets LLM classification by default.
+        // Controlled by SONDERA_LLM_EVENT_TYPES (default: all Action events).
+        // The YARA trigger (SONDERA_LLM_YARA_SEVERITY) can override this: if a signature
+        // match on the event's primary content meets the threshold, the LLM runs regardless.
+        let skip_llm = !self.llm_event_types.includes(&event.event);
+        let skip_llm = skip_llm && {
+            let sig = sondera_signature::scan(&primary_content(&event));
+            !self.yara_triggers(sig.severity)
+        };
 
         let source_agent = &event.agent.provider_id;
         let (adjudicated, raw) = match self.build_request(&event, skip_llm, source_agent).await {
@@ -615,5 +760,75 @@ mod fail_mode_tests {
             closed.violations.iter().any(|v| v.rule == "FAIL_CLOSED"),
             "fail-closed must carry a synthetic FAIL_CLOSED violation"
         );
+    }
+}
+
+#[cfg(test)]
+mod llm_filter_tests {
+    use super::*;
+    use crate::{Prompt, ShellCommand, WebFetch};
+
+    #[test]
+    fn event_filter_defaults_to_all_actions() {
+        let filter = LlmEventFilter::parse("");
+        assert!(filter.0.is_none(), "empty filter should be None (all actions)");
+        assert!(filter.includes(&TrajectoryEvent::Action(Action::ShellCommand(
+            ShellCommand::new("ls")
+        ))));
+        assert!(!filter.includes(&TrajectoryEvent::Observation(Observation::Prompt(
+            Prompt::user("hello")
+        ))));
+    }
+
+    #[test]
+    fn event_filter_explicit_types() {
+        let filter = LlmEventFilter::parse("ShellCommand, WebFetch, FileRead");
+        assert!(filter.includes(&TrajectoryEvent::Action(Action::ShellCommand(
+            ShellCommand::new("ls")
+        ))));
+        assert!(filter.includes(&TrajectoryEvent::Action(Action::WebFetch(
+            WebFetch::new("https://example.com", "test")
+        ))));
+        // FileWrite is NOT in the list → excluded.
+        assert!(!filter.includes(&TrajectoryEvent::Action(Action::FileOperation(
+            crate::FileOperation::write("/tmp/x", "data")
+        ))));
+        // Observations are excluded.
+        assert!(!filter.includes(&TrajectoryEvent::Observation(Observation::Prompt(
+            Prompt::user("hello")
+        ))));
+    }
+
+    #[test]
+    fn event_filter_case_insensitive() {
+        let filter = LlmEventFilter::parse("shellcommand, WEbFeTcH");
+        assert!(filter.includes(&TrajectoryEvent::Action(Action::ShellCommand(
+            ShellCommand::new("ls")
+        ))));
+        assert!(filter.includes(&TrajectoryEvent::Action(Action::WebFetch(
+            WebFetch::new("https://example.com", "test")
+        ))));
+    }
+
+    #[test]
+    fn yara_trigger_parse() {
+        assert_eq!(parse_yara_trigger(""), Some(Severity::Low));
+        assert_eq!(parse_yara_trigger("low"), Some(Severity::Low));
+        assert_eq!(parse_yara_trigger("medium"), Some(Severity::Medium));
+        assert_eq!(parse_yara_trigger("HIGH"), Some(Severity::High));
+        assert_eq!(parse_yara_trigger("critical"), Some(Severity::Critical));
+        assert_eq!(parse_yara_trigger("off"), None);
+        assert_eq!(parse_yara_trigger("none"), None);
+        assert_eq!(parse_yara_trigger("0"), None);
+        assert_eq!(parse_yara_trigger("garbage"), Some(Severity::Low));
+    }
+
+    #[test]
+    fn yara_trigger_threshold_comparison() {
+        let trigger = Some(Severity::Medium);
+        assert!(!(Severity::Low >= trigger.unwrap()));
+        assert!(Severity::Medium >= trigger.unwrap());
+        assert!(Severity::High >= trigger.unwrap());
+        assert!(Severity::Critical >= trigger.unwrap());
     }
 }

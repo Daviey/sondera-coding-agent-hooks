@@ -45,6 +45,37 @@ Default model per provider: `claude-haiku-4-5` (anthropic), `gpt-4o-mini` (opena
 
 Reasoning models (such as `gpt-oss-safeguard-20b`) produce a chain-of-thought before each answer, adding 1 to 5 seconds per classification. For lower latency, choose a non-reasoning model (Haiku, Flash, `gpt-4o-mini`). The classifiers run concurrently, so the per-call latency is the slower of IFC and policy. Repeat content is served from the LRU cache (no LLM call).
 
+## When the LLM classifiers run
+
+By default, the LLM classifiers run on every **Action** event (pre-execution gates: shell commands, file writes, web fetches) and skip **Observation** events (post-execution: command output, file contents, prompts) for latency. Two settings refine this. For the full decision tree (caching, circuit breaker, retry, fail mode), see [`llm-engagement.md`](llm-engagement.md).
+
+### Event-type filter
+
+`SONDERA_LLM_EVENT_TYPES` narrows which event types get the LLM. Comma-separated, case-insensitive, matching Cedar action identifiers:
+
+| Value | Effect |
+|---|---|
+| unset (default) | All Action events get the LLM |
+| `ShellCommand,WebFetch,FileWrite,FileEdit` | Only those types get the LLM; `FileRead`, `FileDelete`, `ToolCall`, and all Observations skip |
+
+Useful for trimming LLM cost on low-risk action types like `FileRead` without losing coverage on write/execute operations.
+
+Valid type names: `ShellCommand`, `WebFetch`, `FileRead`, `FileWrite`, `FileEdit`, `FileDelete`, `PreToolUse`, `Prompt`, `ShellCommandOutput`, `WebFetchOutput`, `FileOperationResult`, `ToolOutput`.
+
+### YARA trigger
+
+`SONDERA_LLM_YARA_SEVERITY` overrides the event-type filter when a YARA signature match is found. If the scan of the event's primary content meets the threshold, the LLM classifiers run regardless:
+
+| Value | Effect |
+|---|---|
+| `low` (default) | Any YARA match (severity ≥ 1) triggers the LLM |
+| `medium` | Medium+ matches only |
+| `high` | High+ matches only |
+| `critical` | Critical only |
+| `off` / `none` / `0` | Disable the YARA trigger (never override the filter) |
+
+This is how secrets or injection patterns in command **output** (an Observation that would normally skip the LLM) still reach the IFC classifier — YARA detects the pattern, and the threshold override forces the LLM to classify it.
+
 ## Per-classifier model
 
 IFC and policy normally share `SONDERA_MODEL`. Override each independently so one classifier can run a cheaper model than the other:

@@ -18,6 +18,7 @@ and [Gemini CLI](https://geminicli.com/docs/hooks/).
 
 - [Architecture](docs/architecture.md) - request flow, the trajectory/event model, entities, and how a decision is reached
 - [Guardrails](docs/guardrails.md) - the YARA, IFC, and policy subsystems and how to extend each
+- [LLM engagement](docs/llm-engagement.md) - when the LLM classifiers run, when they skip, caching, circuit breaker, fail mode, and all config options
 - [Policies](docs/policies.md) - writing and loading Cedar policies
 - [Hooks](docs/hooks.md) - installing per-agent hooks and the stdin/stdout contract
 - [Configuration](docs/configuration.md) - providers, credentials, Vertex, fail mode, CLI flags
