@@ -95,6 +95,16 @@ recursive directory scanning that reads secret files (.env, config.json, \
 secrets.yaml), harvesting of user/system identity information, and silent \
 HTTP/DNS/socket transmission of collected data to remote servers."""
 
+[[policies.categories]]
+code = "SC9"
+name = "Code Obfuscation"
+definition = """\
+Encoded, encrypted, or obfuscated code designed to evade security analysis. \
+Includes base64-encoded payloads passed to eval/exec, hex-escaped strings \
+assembled at runtime, PowerShell -enc encoded commands, string concatenation \
+to build dangerous APIs dynamically, and packed/encrypted scripts that \
+hide their true behavior from static analysis."""
+
 # -- Examples -----------------------------------------------------------------
 
 # Injection
@@ -319,7 +329,28 @@ category = "SC0"
 # Compliant: sending only application metrics to first-party endpoint
 [[policies.examples]]
 content = """\
-metrics = {\"request_count\": counter.value(), \"latency_p99\": histogram.p99()}\n\
+metrics = {"request_count": counter.value(), "latency_p99": histogram.p99()}\\n\
 requests.post(app.config[\"METRICS_URL\"], json=metrics)"""
+violation = false
+category = "SC0"
+
+# Code Obfuscation
+[[policies.examples]]
+content = "python -c \"import base64; exec(base64.b64decode('aW1wb3J0IG9z'))\""
+violation = true
+category = "SC9"
+
+[[policies.examples]]
+content = "powershell -enc JABjAD0ATgBlAHcALQBPAGIAagBlAGMAdAA"
+violation = true
+category = "SC9"
+
+[[policies.examples]]
+content = "eval('\\x6f\\x73\\x2e\\x73\\x79\\x73\\x74\\x65\\x6d\\x28\\x22\\x6c\\x73\\x22\\x29')"
+violation = true
+category = "SC9"
+
+[[policies.examples]]
+content = "print(base64.b64encode(data).decode())"
 violation = false
 category = "SC0"
