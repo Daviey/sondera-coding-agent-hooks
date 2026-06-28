@@ -253,6 +253,9 @@ case "$cmd" in
   start)    start_server "${1:-}" ;;
   stop)     stop_server ;;
   restart)  stop_server; start_server -d ;;
+  build)    cd "$SONDERA" && nix-shell -p openssl pkg-config --run \
+              'cargo build --release -p sondera-harness -p sondera-opencode -p sondera-claude -p sondera-benchmark' \
+            && log "release build complete" ;;
   status)   show_status ;;
   install)  case "${1:-}" in
               claude)   install_claude ;;
@@ -270,6 +273,7 @@ sondera - coding agent guardrail launcher
   start [-d]       Start harness server (-d = background)
   stop             Stop harness server
   restart          Restart harness server
+  build            Rebuild all release binaries
   status           Show server health and stats
   install <agent>  Permanently install hooks (claude or opencode)
   claude [args]    Launch claude with guardrails (hooks auto-injected for this session)
