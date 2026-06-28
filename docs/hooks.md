@@ -50,8 +50,8 @@ The adapter normalizes the agent's JSON into a trajectory `Event` (see `docs/arc
 | `PreToolUse` (Bash/shell) | `Action::ShellCommand` (evaluated before execution; a Deny stops it) |
 | `PreToolUse` (Read/Write/Edit) | `Action::FileOperation` (pre-execution; Deny blocks it) |
 | `PreToolUse` (WebFetch) | `Action::WebFetch` (pre-execution; Deny blocks it) |
-| `PostToolUse` | the matching `Observation` (`ShellCommandOutput`, `FileOperationResult`, `WebFetchOutput`, `ToolOutput`) |
-| `UserPromptSubmit` | `Observation::Prompt` |
+| `PostToolUse` | the matching `Observation` (`ShellCommandOutput`, `FileOperationResult`, `WebFetchOutput`, `ToolOutput`). Runs YARA + Cedar only (no LLM) for latency. |
+| `UserPromptSubmit` | `Observation::Prompt`. YARA + Cedar only. |
 | other lifecycle events | recorded as `Control` or `State`, not authorized |
 
 Pre-execution events are where a Deny actually prevents the action: the command never runs, the file is never written, the fetch never sent. Post-execution events evaluate what came back; a Deny there is recorded on the trajectory and raises the sensitivity label for subsequent events, which can block later exfiltration.

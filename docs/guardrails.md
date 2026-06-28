@@ -6,7 +6,7 @@ Grounded in `crates/guardrails/signature/`, `crates/guardrails/ifc/src/label.rs`
 
 ## How they combine
 
-For each Action and Observation event the harness scans the relevant content with all three and packs the results into the Cedar request context:
+For each **Action** event (pre-execution: the shell command, file write, or web fetch about to run) the harness scans the content with all three subsystems and packs the results into the Cedar request context. **Observation** events (post-execution: command output, file contents, prompt text) run the YARA scan and Cedar only, skipping the LLM classifiers for latency. This cuts LLM calls from 6 per tool call to 2.
 
 | Field | Source | Type |
 |---|---|---|

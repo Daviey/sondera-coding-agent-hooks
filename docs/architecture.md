@@ -44,7 +44,7 @@ Each agent adapter normalizes its own JSON into these common types. Claude's `Ba
 
 ## Adjudication pipeline
 
-For every Action and Observation event, `adjudicate` runs the same pipeline:
+For every Action and Observation event, `adjudicate` runs the pipeline below. Actions (pre-execution gates) run the full pipeline including the LLM classifiers. Observations (post-execution analysis) skip the LLM classifiers (steps 3-4) and use the trajectory's existing label, keeping the deterministic YARA scan and Cedar evaluation. This reduces LLM calls from 6 per tool call to 2.
 
 1. **Persist the event** to the JSONL file store and the Turso trajectory store.
 2. **Scan** the relevant content (command, file path and contents, URL and prompt, tool output) with YARA signatures. This is deterministic and produces a `SignatureContext`: match count, threat categories, and a severity from 0 (none) to 4 (critical).
