@@ -111,6 +111,11 @@ sensitive = false
 label = "public"
 
 [[labels.examples]]
+content = "import hashlib\ndef verify_checksum(path, expected):\n    h = hashlib.sha256()\n    with open(path, 'rb') as f:\n        for chunk in iter(lambda: f.read(8192), b''):\n            h.update(chunk)\n    return h.hexdigest() == expected"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
 content = "import subprocess\nuser_input = request.GET.get('cmd')\nsubprocess.call(f'ls {user_input}', shell=True)"
 sensitive = false
 label = "public"

@@ -227,6 +227,11 @@ violation = false
 category = "SC0"
 
 [[policies.examples]]
+content = "# Documentation: never store passwords in plaintext\npassword = hashlib.sha256(pw).hexdigest()"
+violation = false
+category = "SC0"
+
+[[policies.examples]]
 content = "password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())"
 violation = false
 category = "SC0"
