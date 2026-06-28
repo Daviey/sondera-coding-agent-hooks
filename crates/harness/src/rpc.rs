@@ -160,6 +160,12 @@ where
     }
 
     let mut listener = tarpc::serde_transport::unix::listen(socket_path, Json::default).await?;
+
+    // Restrict socket to owner-only. Without this, the socket inherits the
+    // process umask (typically 0755), letting any local user send events.
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600));
+
     tracing::info!("Harness server listening on {:?}", socket_path);
 
     let server = HarnessServer::new(Arc::new(harness));
