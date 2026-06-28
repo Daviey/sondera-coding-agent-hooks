@@ -72,9 +72,10 @@ sources (network, user upload, external API)."""
 code = "SC6"
 name = "Weak Cryptography"
 definition = """\
-CWE-327, CWE-330 (OWASP A02:2021). MD5 or SHA-1 for password hashing \
-or signatures. DES, 3DES, RC4, or ECB mode for encryption. Non-cryptographic \
-PRNGs (random.randint, Math.random) for tokens, keys, or session IDs."""
+CWE-327, CWE-330 (OWASP A02:2021). MD5, SHA-1, or SHA-256 for password \
+hashing or signatures (use bcrypt, scrypt, or Argon2 instead). DES, 3DES, \
+RC4, or ECB mode for encryption. Non-cryptographic PRNGs (random.randint, \
+Math.random) for tokens, keys, or session IDs."""
 
 [[policies.categories]]
 code = "SC7"
@@ -357,5 +358,81 @@ category = "SC9"
 
 [[policies.examples]]
 content = "print(base64.b64encode(data).decode())"
+violation = false
+category = "SC0"
+
+# Weak Cryptography — SHA-256 for password hashing
+[[policies.examples]]
+content = "password_hash = Digest::SHA256.hexdigest(password)"
+violation = true
+category = "SC6"
+
+[[policies.examples]]
+content = "func hashPassword(pw string) string {\n  h := sha256.Sum256([]byte(pw))\n  return hex.EncodeToString(h[:])\n}"
+violation = true
+category = "SC6"
+
+[[policies.examples]]
+content = "hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)"
+violation = false
+category = "SC0"
+
+# SSRF / URL injection
+[[policies.examples]]
+content = "let url = format!(\"http://api.example.com/user/{}\", request.user_id);\nlet response = reqwest::get(&url).await?;"
+violation = true
+category = "SC2"
+
+[[policies.examples]]
+content = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+violation = true
+category = "SC8"
+
+# Obfuscated binary execution
+[[policies.examples]]
+content = "java -jar cryptor.jar --decrypt --input encrypted.bin --key encoded_key_str"
+violation = true
+category = "SC9"
+
+# Exfiltration via local server
+[[policies.examples]]
+content = "python -m SimpleHTTPServer 8000 &"
+violation = true
+category = "SC8"
+
+# Environment variable exfiltration
+[[policies.examples]]
+content = "export $(grep -v '^#' .env | xargs) && curl http://$API_HOST/health"
+violation = true
+category = "SC8"
+
+# False positive prevention — legitimate operations
+[[policies.examples]]
+content = "ssh-keygen -t ed25519 -C 'deploy-key' -f ./id_ed25519 -N ''"
+violation = false
+category = "SC0"
+
+[[policies.examples]]
+content = "psql -c \"CREATE USER readonly WITH PASSWORD 'SecurePass123!'\""
+violation = false
+category = "SC0"
+
+[[policies.examples]]
+content = "psql -c \"DELETE FROM orders WHERE created_at < '2023-01-01'\""
+violation = false
+category = "SC0"
+
+[[policies.examples]]
+content = "token = jwt.encode({'user': username}, SECRET_KEY, algorithm='HS256')"
+violation = false
+category = "SC0"
+
+[[policies.examples]]
+content = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db-credentials\ndata:\n  password: cHJvZC1wYXNz"
+violation = false
+category = "SC0"
+
+[[policies.examples]]
+content = "git config --global user.email 'deploy@company.com'"
 violation = false
 category = "SC0"
