@@ -26,7 +26,7 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 use tracing::debug;
 
-use crate::openai_compat::{build_json_object_body, send_and_parse};
+use crate::openai_compat::{build_json_object_body, merge_reasoning_control, send_and_parse};
 use crate::{LlmConfig, LlmError, Provider};
 
 /// OAuth2 scope used for Vertex and Cloud Resource Manager.
@@ -95,8 +95,14 @@ impl VertexCompleter {
             user,
             schema,
             true, // Vertex (first-party shim and vLLM) supports strict json_schema
-            crate::Provider::Vertex,
         );
+        // Only minimise reasoning on the deployed vLLM endpoint (gpt-oss-safeguard).
+        // The first-party OpenAI shim (Gemini) is non-reasoning and rejects reasoning_effort.
+        let body = if self.config.vertex_endpoint_id.is_some() {
+            merge_reasoning_control(body, crate::Provider::Vertex.reasoning_disable_fields())
+        } else {
+            body
+        };
         debug!(url = %url, model = %self.config.model, "vertex request");
         let started = std::time::Instant::now();
         let result = send_and_parse(&self.http, &url, &body, Some(&bearer), timeout).await;
