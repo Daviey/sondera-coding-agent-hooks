@@ -493,16 +493,45 @@ impl CedarPolicyHarness {
 
     /// Warm the vector fast-path classifiers from a labelled corpus file.
     pub fn warm_vectors(&self, corpus_path: &std::path::Path) {
-        let (ifc_vc, policy_vc) = vector::train_from_corpus(corpus_path);
+        // Load persisted vectors first (accumulated from previous sessions).
+        let storage = file::get_storage_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let ifc_path = storage.join("ifc_vectors.json");
+        let policy_path = storage.join("policy_vectors.json");
+
+        let (mut ifc_vc, mut policy_vc) = if ifc_path.exists() {
+            tracing::info!("loading persisted vector database");
+            (
+                vector::VectorClassifier::load(&ifc_path).unwrap_or_else(|| { let (i,p) = vector::train_from_corpus(corpus_path); i }),
+                vector::VectorClassifier::load(&policy_path).unwrap_or_else(|| { let (_,p) = vector::train_from_corpus(corpus_path); p }),
+            )
+        } else {
+            vector::train_from_corpus(corpus_path)
+        };
+
+        // Also train on the corpus to pick up any new entries since last save.
+        let (corpus_ifc, corpus_policy) = vector::train_from_corpus(corpus_path);
+        ifc_vc.merge_centroids(&corpus_ifc);
+        policy_vc.merge_centroids(&corpus_policy);
+
         let ifc_size = ifc_vc.size();
         let policy_size = policy_vc.size();
-        if let Ok(mut vc) = self.ifc_vector.lock() {
-            *vc = ifc_vc;
+        if let Ok(mut vc) = self.ifc_vector.lock() { *vc = ifc_vc; }
+        if let Ok(mut vc) = self.policy_vector.lock() { *vc = policy_vc; }
+        tracing::info!(ifc_docs = ifc_size, policy_docs = policy_size, "vector fast-path warmed");
+
+        // Persist the warmed vectors so they survive restarts.
+        self.save_vectors();
+    }
+
+    /// Save vector databases to disk.
+    fn save_vectors(&self) {
+        let storage = file::get_storage_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Ok(vc) = self.ifc_vector.lock() {
+            vc.save(&storage.join("ifc_vectors.json"));
         }
-        if let Ok(mut vc) = self.policy_vector.lock() {
-            *vc = policy_vc;
+        if let Ok(vc) = self.policy_vector.lock() {
+            vc.save(&storage.join("policy_vectors.json"));
         }
-        tracing::info!(ifc_docs = ifc_size, policy_docs = policy_size, "vector fast-path warmed from corpus");
     }
 
     /// Get the loaded policy set.
@@ -537,17 +566,21 @@ impl CedarPolicyHarness {
         content: &str,
         skip_llm: bool,
         source_agent: &str,
+        yara_clean: bool,
     ) -> Result<Label> {
         if skip_llm {
             return Ok(Label::Public);
         }
 
         // Fast-path: check vector classifier before calling the LLM.
-        if let Ok(vc) = self.ifc_vector.lock() {
-            if let Some(predicted) = vc.classify(content) {
-                debug!(label = %predicted, "IFC vector fast-path hit");
-                if let Ok(label) = predicted.parse::<Label>() {
-                    return Ok(label);
+        // Only when YARA is clean — never bypass for flagged content.
+        if yara_clean {
+            if let Ok(vc) = self.ifc_vector.lock() {
+                if let Some(predicted) = vc.classify(content) {
+                    debug!(label = %predicted, "IFC vector fast-path hit");
+                    if let Ok(label) = predicted.parse::<Label>() {
+                        return Ok(label);
+                    }
                 }
             }
         }
@@ -560,6 +593,7 @@ impl CedarPolicyHarness {
                     vc.train(content, &label.to_string());
                     vc.finalise();
                 }
+                self.save_vectors();
                 Ok(label)
             }
             Err(error) => {
@@ -580,17 +614,21 @@ impl CedarPolicyHarness {
         content: &str,
         skip_llm: bool,
         source_agent: &str,
+        yara_clean: bool,
     ) -> Result<PolicyClassification> {
         if skip_llm {
             return Ok(default_classification_for(FailMode::Open));
         }
 
         // Fast-path: check vector classifier before calling the LLM.
-        if let Ok(vc) = self.policy_vector.lock() {
-            if let Some(predicted) = vc.classify(content) {
-                debug!(verdict = %predicted, "policy vector fast-path hit");
-                let compliant = predicted == "compliant";
-                return Ok(PolicyClassification { compliant, violations: Vec::new() });
+        // Only when YARA is clean — never bypass for flagged content.
+        if yara_clean {
+            if let Ok(vc) = self.policy_vector.lock() {
+                if let Some(predicted) = vc.classify(content) {
+                    debug!(verdict = %predicted, "policy vector fast-path hit");
+                    let compliant = predicted == "compliant";
+                    return Ok(PolicyClassification { compliant, violations: Vec::new() });
+                }
             }
         }
 
@@ -602,6 +640,7 @@ impl CedarPolicyHarness {
                     vc.train(content, verdict);
                     vc.finalise();
                 }
+                self.save_vectors();
                 Ok(classification)
             }
             Err(error) => {
@@ -634,6 +673,7 @@ impl CedarPolicyHarness {
         content: &str,
         skip_llm: bool,
         source_agent: &str,
+        yara_clean: bool,
     ) -> Result<(Label, PolicyClassification)> {
         if let Some((sensitivity, policy_classification)) =
             self.classify_combined(content, skip_llm, source_agent).await?
@@ -641,8 +681,8 @@ impl CedarPolicyHarness {
             return Ok((sensitivity.max_label(), policy_classification));
         }
         let (label, policy_classification) = tokio::try_join!(
-            self.classify_label(content, skip_llm, source_agent),
-            self.evaluate_policy(content, skip_llm, source_agent),
+            self.classify_label(content, skip_llm, source_agent, yara_clean),
+            self.evaluate_policy(content, skip_llm, source_agent, yara_clean),
         )?;
         Ok((label, policy_classification))
     }

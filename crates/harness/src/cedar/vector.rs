@@ -7,12 +7,14 @@
 //!
 //! Trained from the benchmark corpus at startup + every LLM result at runtime.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Minimum cosine similarity to accept a vector classification without the LLM.
 const CONFIDENCE_THRESHOLD: f64 = 0.15;
 
 /// A multi-class TF-IDF classifier with per-class centroid vectors.
+#[derive(Serialize, Deserialize)]
 pub struct VectorClassifier {
     vocab: HashMap<String, usize>,
     df: Vec<usize>,
@@ -109,6 +111,26 @@ impl VectorClassifier {
     }
 
     pub fn size(&self) -> usize { self.n_docs }
+
+    /// Merge centroids from another classifier (adds new labels, keeps existing).
+    pub fn merge_centroids(&mut self, other: &VectorClassifier) {
+        for (label, centroid) in &other.centroids {
+            self.centroids.entry(label.clone()).or_insert_with(|| centroid.clone());
+        }
+    }
+
+    /// Persist to disk as JSON. Called after incremental learning.
+    pub fn save(&self, path: &std::path::Path) {
+        if let Ok(json) = serde_json::to_string(self) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+
+    /// Load from disk. Returns None if the file doesn't exist or is invalid.
+    pub fn load(path: &std::path::Path) -> Option<Self> {
+        let data = std::fs::read(path).ok()?;
+        serde_json::from_slice(&data).ok()
+    }
 
     fn content_vector(&self, content: &str) -> Vec<f64> {
         let tokens = tokenize(content);
