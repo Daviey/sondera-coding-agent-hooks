@@ -73,13 +73,14 @@ self-hosted gateways). The harness server loads `~/.sondera/env` at startup so
 the classifiers run with whichever provider you configure.
 
 `SONDERA_FAIL_MODE` controls what happens when a classifier is unavailable or
-errors (`open` by default, `closed`, or `closed-hard`):
+errors (`open` by default, `closed`, `closed-hard`, or `escalate`):
 
 | Mode          | On classifier failure                                                                 |
 |---------------|---------------------------------------------------------------------------------------|
 | `open`        | Substitute benign defaults (Public / compliant) so Cedar permits the action.          |
 | `closed`      | Substitute restrictive defaults (Highly Confidential / a `FAIL_CLOSED` violation) so Cedar's forbids deny. |
 | `closed-hard` | Short-circuit adjudication and **deny the action outright**, bypassing Cedar. Use where an unavailable classifier must never let any action through. |
+| `escalate`    | Short-circuit adjudication and return `Decision::Escalate` for human review, bypassing Cedar. A middle ground between `open` and `closed-hard`: while a classifier is down, actions are neither auto-permitted nor auto-denied. |
 
 ### 1. Start the harness server
 

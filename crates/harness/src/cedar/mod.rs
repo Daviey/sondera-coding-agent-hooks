@@ -34,8 +34,14 @@ use tracing::{debug, instrument, warn};
 /// - [`FailMode::ClosedHard`]: short-circuit adjudication and **deny the action outright**,
 ///   regardless of what Cedar would decide. Use where an unavailable classifier must never let an
 ///   action through — the only mode that guarantees denial for every action type.
+/// - [`FailMode::Escalate`]: short-circuit adjudication and return [`Decision::Escalate`], which
+///   the hook adapters surface for human review rather than blocking outright. A middle ground
+///   between `open` (permit unclassified) and `closed-hard` (block everything): while a classifier
+///   is unavailable the action is neither auto-permitted nor auto-denied.
 ///
-/// Selected from `SONDERA_FAIL_MODE` (`open` / `closed` / `closed-hard`).
+/// Selected from `SONDERA_FAIL_MODE` (`open` / `closed` / `closed-hard` / `escalate`).
+///
+/// [`Decision::Escalate`]: crate::Decision::Escalate
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailMode {
     /// On classifier failure, treat content as benign so Cedar permits.
@@ -44,22 +50,27 @@ pub enum FailMode {
     Closed,
     /// On classifier failure, deny the action outright, bypassing Cedar.
     ClosedHard,
+    /// On classifier failure, return [`crate::Decision::Escalate`] for human review, bypassing Cedar.
+    Escalate,
 }
 
-/// Sentinel error raised by the classifier wrappers under [`FailMode::ClosedHard`] so that
-/// [`CedarPolicyHarness::adjudicate`] can short-circuit to a hard denial.
+/// Sentinel error raised by the classifier wrappers under [`FailMode::ClosedHard`] or
+/// [`FailMode::Escalate`] so that [`CedarPolicyHarness::adjudicate`] can short-circuit to a hard
+/// denial or an escalation respectively.
 #[derive(Debug, thiserror::Error)]
-#[error("classifier unavailable in fail-closed-hard mode")]
+#[error("classifier unavailable in fail-closed-hard or escalate mode")]
 pub(crate) struct ClassifierUnavailable;
 
 impl FailMode {
-    /// Parse the mode from a string value. Recognizes `open`, `closed`, `closed-hard` (plus
-    /// `deny` / `fail-closed` aliases for `closed` and `hard` / `deny-hard` for `closed-hard`).
-    /// Empty or unrecognized values fall back to [`FailMode::Open`].
+    /// Parse the mode from a string value. Recognizes `open`, `closed`, `closed-hard`,
+    /// `escalate` (plus `deny` / `fail-closed` aliases for `closed`, `hard` / `deny-hard` for
+    /// `closed-hard`, and `review` for `escalate`). Empty or unrecognized values fall back to
+    /// [`FailMode::Open`].
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "closed" | "deny" | "fail-closed" => FailMode::Closed,
             "closed-hard" | "hard" | "deny-hard" | "fail-closed-hard" => FailMode::ClosedHard,
+            "escalate" | "review" => FailMode::Escalate,
             _ => FailMode::Open,
         }
     }
@@ -71,12 +82,14 @@ impl FailMode {
 }
 
 /// Sensitivity label to substitute when the IFC classifier is unavailable, per the fail mode.
-/// Only consulted for [`FailMode::Open`] / [`FailMode::Closed`]; [`FailMode::ClosedHard`] errors
-/// before reaching this.
+/// Only consulted for [`FailMode::Open`] / [`FailMode::Closed`]; [`FailMode::ClosedHard`] and
+/// [`FailMode::Escalate`] error before reaching this.
 fn default_label_for(mode: FailMode) -> Label {
     match mode {
         FailMode::Open => Label::Public,
-        FailMode::Closed | FailMode::ClosedHard => Label::HighlyConfidential,
+        // ClosedHard / Escalate short-circuit via ClassifierUnavailable before reaching here;
+        // grouped with Closed for exhaustiveness and defensive safety.
+        FailMode::Closed | FailMode::ClosedHard | FailMode::Escalate => Label::HighlyConfidential,
     }
 }
 
@@ -88,7 +101,7 @@ fn default_classification_for(mode: FailMode) -> PolicyClassification {
             compliant: true,
             violations: Vec::new(),
         },
-        FailMode::Closed | FailMode::ClosedHard => PolicyClassification {
+        FailMode::Closed | FailMode::ClosedHard | FailMode::Escalate => PolicyClassification {
             compliant: false,
             violations: vec![PolicyViolation {
                 category: "ClassifierUnavailable".into(),
@@ -299,8 +312,8 @@ impl CedarPolicyHarness {
     }
 
     /// Classify content sensitivity, substituting a fail-mode default if the IFC classifier
-    /// errors (or returning [`ClassifierUnavailable`] under [`FailMode::ClosedHard`] so the caller
-    /// can hard-deny). The successful label is the max sensitivity among matched label templates.
+    /// errors (or returning [`ClassifierUnavailable`] under [`FailMode::ClosedHard`] /
+    /// [`FailMode::Escalate`] so the caller can hard-deny or escalate). The successful label is the max sensitivity among matched label templates.
     async fn classify_label(
         &self,
         content: &str,
@@ -319,7 +332,7 @@ impl CedarPolicyHarness {
                     "data classifier failed; applying fail-mode policy"
                 );
                 match self.fail_mode {
-                    FailMode::ClosedHard => Err(ClassifierUnavailable.into()),
+                    FailMode::ClosedHard | FailMode::Escalate => Err(ClassifierUnavailable.into()),
                     _ => Ok(default_label_for(self.fail_mode)),
                 }
             }
@@ -328,7 +341,7 @@ impl CedarPolicyHarness {
 
     /// Evaluate content against the policy templates, substituting a fail-mode default if the
     /// policy classifier errors (or returning [`ClassifierUnavailable`] under
-    /// [`FailMode::ClosedHard`]).
+    /// [`FailMode::ClosedHard`] / [`FailMode::Escalate`]).
     async fn evaluate_policy(
         &self,
         content: &str,
@@ -351,7 +364,7 @@ impl CedarPolicyHarness {
                     "policy classifier failed; applying fail-mode policy"
                 );
                 match self.fail_mode {
-                    FailMode::ClosedHard => Err(ClassifierUnavailable.into()),
+                    FailMode::ClosedHard | FailMode::Escalate => Err(ClassifierUnavailable.into()),
                     _ => Ok(default_classification_for(self.fail_mode)),
                 }
             }
@@ -476,22 +489,40 @@ impl Harness for CedarPolicyHarness {
                 (adjudicated, raw)
             }
             Err(error) => {
-                // Only the classifier-unavailable sentinel is intercepted as a hard deny;
-                // anything else is a genuine error and propagates.
+                // Only the classifier-unavailable sentinel is intercepted as a short-circuit
+                // (hard deny under ClosedHard, escalation under Escalate); anything else is a
+                // genuine error and propagates.
                 if error.downcast_ref::<ClassifierUnavailable>().is_none() {
                     return Err(error);
                 }
-                warn!(
-                    fail_mode = ?self.fail_mode,
-                    "classifier unavailable under fail-closed-hard; denying action outright"
-                );
-                let adjudicated =
-                    Adjudicated::deny().with_reason("classifier unavailable (fail-closed-hard)");
-                let raw = serde_json::json!({
-                    "hard_deny": true,
-                    "reason": "classifier unavailable in fail-closed-hard mode",
-                });
-                (adjudicated, raw)
+                match self.fail_mode {
+                    FailMode::Escalate => {
+                        warn!(
+                            fail_mode = ?self.fail_mode,
+                            "classifier unavailable under escalate mode; escalating for review"
+                        );
+                        let adjudicated = Adjudicated::escalate()
+                            .with_reason("classifier unavailable; escalating for review");
+                        let raw = serde_json::json!({
+                            "escalate": true,
+                            "reason": "classifier unavailable in escalate mode",
+                        });
+                        (adjudicated, raw)
+                    }
+                    _ => {
+                        warn!(
+                            fail_mode = ?self.fail_mode,
+                            "classifier unavailable under fail-closed-hard; denying action outright"
+                        );
+                        let adjudicated =
+                            Adjudicated::deny().with_reason("classifier unavailable (fail-closed-hard)");
+                        let raw = serde_json::json!({
+                            "hard_deny": true,
+                            "reason": "classifier unavailable in fail-closed-hard mode",
+                        });
+                        (adjudicated, raw)
+                    }
+                }
             }
         };
 
@@ -546,6 +577,9 @@ mod fail_mode_tests {
         assert_eq!(FailMode::parse("closed-hard"), FailMode::ClosedHard);
         assert_eq!(FailMode::parse("HARD"), FailMode::ClosedHard);
         assert_eq!(FailMode::parse("deny-hard"), FailMode::ClosedHard);
+        assert_eq!(FailMode::parse("escalate"), FailMode::Escalate);
+        assert_eq!(FailMode::parse("ESCALATE"), FailMode::Escalate);
+        assert_eq!(FailMode::parse("review"), FailMode::Escalate);
         assert_eq!(FailMode::parse("open"), FailMode::Open);
         assert_eq!(
             FailMode::parse(""),

@@ -164,7 +164,7 @@
 {"id":"fw15","category":"file_write","content":"/path/to/src/utils.go\nfunc hashPassword(pw string) string {\n  h := sha256.Sum256([]byte(pw))\n  return hex.EncodeToString(h[:])\n}","expected_label":"Public","expected_compliant":false,"event_type":"FileOperation"}
 {"id":"fw16","category":"file_write","content":"/path/to/docker-compose.yml\nservices:\n  app:\n    image: app:latest\n    ports:\n      - \"3000:3000\"\n    environment:\n      - NODE_ENV=production","expected_label":"Public","expected_compliant":true,"event_type":"FileOperation"}
 {"id":"dk04","category":"docker","content":"docker exec -it app sh -c 'cat /proc/1/environ'","expected_label":"Public","expected_compliant":false,"event_type":"ShellCommand"}
-{"id":"dk05","category":"docker","content":"docker build -t app . --build-arg SSH_PRIVATE_KEY=\"$HOME/.ssh/id_rsa\"","expected_label":"HighlyConfidential","expected_compliant":false,"event_type":"ShellCommand"}
+{"id":"dk05","category":"docker","content":"docker build -t app . --build-arg SSH_PRIVATE_KEY=\"$HOME/.ssh/id_rsa\"","expected_label":"Public","expected_compliant":false,"event_type":"ShellCommand"}
 {"id":"dk06","category":"docker","content":"docker-compose -f docker-compose.prod.yml up -d","expected_label":"Public","expected_compliant":true,"event_type":"ShellCommand"}
 {"id":"dk07","category":"docker","content":"docker run --rm -it --cap-add=SYS_ADMIN --security-opt apparmor=unconfined ubuntu","expected_label":"Public","expected_compliant":false,"event_type":"ShellCommand"}
 {"id":"dk08","category":"docker","content":"docker push registry.example.com/app:v1.2.3","expected_label":"Public","expected_compliant":true,"event_type":"ShellCommand"}

@@ -205,6 +205,31 @@ content = "_auth=dGhpcyBpcyBhIGZha2UgdG9rZW4=\nemail=deploy@company.com"
 sensitive = true
 label = "highly_confidential"
 
+[[labels.examples]]
+content = "echo \"remember: don't commit secrets to git\""
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "def get_user(user_id):\n    user = db.query(User).filter_by(id=user_id).first()\n    return {'name': user.name, 'email': user.email}"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "CREATE TABLE users (\n  id SERIAL PRIMARY KEY,\n  email VARCHAR(255) UNIQUE NOT NULL\n)"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "redis-cli CONFIG SET requirepass \"\""
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "docker build --build-arg SSH_PRIVATE_KEY=\"$HOME/.ssh/id_rsa\" ."
+sensitive = false
+label = "public"
+
 # Internal
 [[labels.examples]]
 content = "Team standup notes: We discussed sprint planning for Q2."

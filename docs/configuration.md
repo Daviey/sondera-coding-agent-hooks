@@ -110,8 +110,9 @@ The LLM classifiers can fail or be unreachable. `SONDERA_FAIL_MODE` decides what
 | `open` (default) | Substitutes benign defaults (Public label, compliant policy) so Cedar permits the action. This matches the original non-blocking behaviour. |
 | `closed` | Substitutes restrictive defaults (Highly Confidential label, a `FAIL_CLOSED` violation) so Cedar's forbids deny the action. |
 | `closed-hard` | Denies the action outright, bypassing Cedar. Use when an unavailable classifier must never let any action through. |
+| `escalate` | Returns `Decision::Escalate` for human review, bypassing Cedar. A middle ground between `open` and `closed-hard`: while a classifier is down, actions are neither auto-permitted nor auto-denied. The hook adapters record the escalation for follow-up. |
 
-`closed` is biased toward denial through Cedar's normal evaluation. `closed-hard` is a guaranteed deny regardless of the action.
+`closed` is biased toward denial through Cedar's normal evaluation. `closed-hard` is a guaranteed deny regardless of the action. `escalate` surfaces the action for review instead of deciding automatically.
 
 ## Logging
 

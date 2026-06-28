@@ -59,6 +59,7 @@ Pick `SONDERA_FAIL_MODE` for the deployment's risk tolerance:
 - `open` tolerates classifier outages at the cost of letting actions through unclassified. Suitable for development or read-heavy workflows.
 - `closed` biases to denial through Cedar's normal evaluation when a classifier is unavailable.
 - `closed-hard` denies every action outright while a classifier is down, bypassing Cedar. The safest choice for production, at the cost of availability during a provider outage.
+- `escalate` returns `Decision::Escalate` for human review while a classifier is down, bypassing Cedar. Use when neither permitting nor denying unclassified actions is acceptable — the hook adapters surface escalations for follow-up.
 
 ## Multi-user
 
