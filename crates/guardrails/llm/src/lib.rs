@@ -179,6 +179,24 @@ impl Provider {
         matches!(self, Provider::Openai | Provider::Vertex)
     }
 
+    /// Extra JSON body fields to disable reasoning/thinking, if the provider's API supports it.
+    /// Reasoning models waste latency and tokens on chain-of-thought the classifiers don't need;
+    /// they only require a small structured JSON verdict. Returns `None` for providers whose
+    /// models are non-reasoning by default (gpt-4o-mini, Haiku, Flash) or where the API rejects
+    /// the parameter (gpt-oss-safeguard's Harmony format).
+    pub fn reasoning_disable_fields(self) -> Option<Value> {
+        match self {
+            // z.ai fully supports skipping reasoning.
+            Provider::Zai => Some(serde_json::json!({"reasoning_effort": "none"})),
+            // Vertex deployed gpt-oss-safeguard rejects "none" (Harmony requires thinking)
+            // but accepts "low", which halves reasoning tokens and cuts ~1s of latency.
+            Provider::Vertex => Some(serde_json::json!({"reasoning_effort": "low"})),
+            // Non-reasoning models (gpt-4o-mini, Haiku, Flash) don't send the field.
+            // Ollama's gpt-oss-safeguard may reject it, so skip.
+            _ => None,
+        }
+    }
+
     /// Parse a provider name from a case-insensitive string.
     pub fn parse(name: &str) -> Result<Self, LlmError> {
         match name.trim().to_ascii_lowercase().as_str() {

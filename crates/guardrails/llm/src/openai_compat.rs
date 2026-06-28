@@ -91,6 +91,7 @@ impl OpenAiCompatCompleter {
             user,
             schema,
             self.provider.supports_strict_json_schema(),
+            self.provider,
         );
         let started = std::time::Instant::now();
         let bearer = self.api_key.as_ref().map(|k| format!("Bearer {k}"));
@@ -135,8 +136,9 @@ pub(crate) fn build_json_object_body(
     user: &str,
     schema: Value,
     strict: bool,
+    provider: crate::Provider,
 ) -> Value {
-    if strict {
+    let mut body = if strict {
         let schema = ensure_all_properties_required(harden_schema(schema));
         json!({
             "model": model,
@@ -171,7 +173,19 @@ pub(crate) fn build_json_object_body(
             ],
             "response_format": { "type": "json_object" },
         })
+    };
+
+    // Merge provider-specific reasoning-control fields (e.g. reasoning_effort=low for Vertex)
+    // to minimise latency. Classifiers only need a JSON verdict, not a chain-of-thought.
+    if let (Some(extra), Some(body_map)) =
+        (provider.reasoning_disable_fields(), body.as_object_mut())
+    {
+        if let Some(extra_map) = extra.as_object() {
+            body_map.extend(extra_map.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
     }
+
+    body
 }
 
 /// POST a built Chat Completions body to `url` and parse the first choice's content as JSON.

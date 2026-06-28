@@ -95,6 +95,7 @@ impl VertexCompleter {
             user,
             schema,
             true, // Vertex (first-party shim and vLLM) supports strict json_schema
+            crate::Provider::Vertex,
         );
         debug!(url = %url, model = %self.config.model, "vertex request");
         let started = std::time::Instant::now();
