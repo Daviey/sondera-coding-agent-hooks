@@ -163,7 +163,41 @@ Write your own `.cedar` files into this directory to add custom rules. The
 harness evaluates all policies on every hook event: a single matching `forbid`
 overrides any `permit`.
 
-### 4. Examples
+### 4. Verify
+
+Build the workspace, then confirm the loop works end-to-end with Claude Code in
+print mode:
+
+```bash
+# Build all binaries (needs pkg-config + libssl-dev on Linux)
+cargo build --workspace
+
+# Start the harness server (loads ~/.sondera/env + policies/)
+cargo run --bin sondera-harness-server -- -v &
+
+# Install hooks for Claude Code (local scope, not committed)
+cargo run -p sondera-claude -- install
+```
+
+Run Claude Code non-interactively and watch a benign command pass:
+
+```bash
+# Prompt FIRST, then --allowedTools (it is variadic and consumes trailing args)
+claude -p "Use the Bash tool to run: ls" --allowedTools "Bash"
+# -> allowed; the harness classifies via the configured provider and Cedar permits
+```
+
+And a destructive command get blocked:
+
+```bash
+claude -p "Use the Bash tool to run: rm -rf /tmp/sondera-verify" --allowedTools "Bash"
+# -> denied; Cedar's forbid-rm-rf policy blocks it before execution
+```
+
+With `-v` on the server, the stderr log shows every classification, including
+the provider, model, latency, and token counts.
+
+### 5. Examples
 
 The `examples/` directory contains standalone policies, payloads, and runnable
 hook examples.

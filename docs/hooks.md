@@ -74,4 +74,14 @@ Run the adapter by hand to see the stdin/stdout contract and the decision. Pipe 
 echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | sondera-claude --verbose pre-tool-use
 ```
 
+To test the full loop with Claude Code non-interactively, use `claude -p`. Put the prompt before `--allowedTools`, because that flag is variadic and will consume any trailing positional arguments as tool names:
+
+```bash
+claude -p "Use the Bash tool to run: ls" --allowedTools "Bash"
+# -> allowed
+
+claude -p "Use the Bash tool to run: rm -rf /tmp/sondera-verify" --allowedTools "Bash"
+# -> denied by forbid-rm-rf
+```
+
 With `-v`, the adapter and the server both log to stderr, including the `sondera::llm` events with provider, model, latency, and token counts (see `docs/configuration.md`).
