@@ -6,6 +6,7 @@ members = [
     "apps/cursor",
     "apps/gemini",
     "apps/opencode",
+    "apps/benchmark",
     "crates/guardrails/ifc",
     "crates/guardrails/llm",
     "crates/guardrails/policy",

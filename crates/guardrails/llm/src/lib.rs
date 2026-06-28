@@ -143,7 +143,7 @@ impl Provider {
             Provider::Openai => "gpt-4o-mini",
             Provider::Ollama => "gpt-oss-safeguard:20b",
             Provider::Vertex => "gemini-2.0-flash",
-            Provider::Zai => "glm-4.6",
+            Provider::Zai => "glm-4.5-flash",
         }
     }
 
@@ -191,8 +191,9 @@ impl Provider {
     /// the parameter (gpt-oss-safeguard's Harmony format).
     pub fn reasoning_disable_fields(self) -> Option<Value> {
         match self {
-            // z.ai fully supports skipping reasoning.
-            Provider::Zai => Some(serde_json::json!({"reasoning_effort": "none"})),
+            // z.ai: disable chain-of-thought via thinking.type=disabled (GLM-4.5+).
+            // reasoning_effort is GLM-5.2+ only and has no effect on 4.6.
+            Provider::Zai => Some(serde_json::json!({"thinking": {"type": "disabled"}})),
             // Vertex deployed gpt-oss-safeguard rejects "none" (Harmony requires thinking)
             // but accepts "low", which halves reasoning tokens and cuts ~1s of latency.
             Provider::Vertex => Some(serde_json::json!({"reasoning_effort": "low"})),

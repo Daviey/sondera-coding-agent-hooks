@@ -5315,6 +5315,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fef461faaeb36c340b6c887167a9054a034f6acfc50a014ead26a02b4356b3de"
 
 [[package]]
+name = "sondera-benchmark"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "serde",
+ "serde_json",
+ "sondera-config",
+ "sondera-information-flow-control",
+ "sondera-llm",
+ "sondera-policy",
+ "sondera-signature",
+ "tokio",
+]
+
+[[package]]
 name = "sondera-claude"
 version = "0.1.0"
 dependencies = [

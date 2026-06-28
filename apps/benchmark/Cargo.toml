@@ -1,0 +1,25 @@
+[package]
+name = "sondera-benchmark"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Benchmark and evaluation harness for Sondera guardrail classifiers"
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sondera-benchmark"
+path = "src/main.rs"
+
+[dependencies]
+sondera-information-flow-control = { path = "../../crates/guardrails/ifc" }
+sondera-policy = { path = "../../crates/guardrails/policy" }
+sondera-signature = { path = "../../crates/guardrails/signature" }
+sondera-config = { workspace = true }
+sondera-llm = { path = "../../crates/guardrails/llm" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
