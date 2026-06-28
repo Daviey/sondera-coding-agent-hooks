@@ -1,6 +1,7 @@
 pub mod entity;
 mod transform;
 mod combined;
+mod vector;
 
 use crate::cedar::entity::Trajectory;
 use crate::harness::Harness;
@@ -21,6 +22,7 @@ use sondera_policy::{PolicyClassification, PolicyModel, PolicyViolation};
 use sondera_signature::Severity;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tracing::{debug, instrument, warn};
 
 /// How the harness treats a classifier (IFC data-sensitivity or policy) failure.
@@ -297,6 +299,9 @@ pub struct CedarPolicyHarness {
     yara_trigger: YaraTrigger,
     yara_gate_actions: YaraGateActions,
     combined_mode: CombinedMode,
+    /// TF-IDF vector classifiers for fast-path classification (skips LLM when confident).
+    ifc_vector: Mutex<vector::VectorClassifier>,
+    policy_vector: Mutex<vector::VectorClassifier>,
 }
 
 impl CedarPolicyHarness {
@@ -446,7 +451,7 @@ impl CedarPolicyHarness {
         let policy_model_path = path.join("policies.toml");
         let policy_model = PolicyModel::from_toml(policy_model_path)?;
 
-        Ok(Self {
+        let harness = Self {
             authorizer: Authorizer::new(),
             entity_store,
             trajectory_store,
@@ -459,7 +464,17 @@ impl CedarPolicyHarness {
             yara_trigger: yara_trigger_from_env(),
             yara_gate_actions: YaraGateActions::from_env(),
             combined_mode: CombinedMode::from_env(),
-        })
+            ifc_vector: Mutex::new(vector::VectorClassifier::new()),
+            policy_vector: Mutex::new(vector::VectorClassifier::new()),
+        };
+
+        // Warm the vector classifiers from the benchmark corpus if available.
+        let corpus_path = path.join("..").join("benchmarks").join("corpus.jsonl");
+        if corpus_path.exists() {
+            harness.warm_vectors(&corpus_path);
+        }
+
+        Ok(harness)
     }
 
     /// Ensure the agent entity exists in the entity store.
@@ -474,6 +489,20 @@ impl CedarPolicyHarness {
             self.entity_store.upsert(&agent_entity)?;
         }
         Ok(())
+    }
+
+    /// Warm the vector fast-path classifiers from a labelled corpus file.
+    pub fn warm_vectors(&self, corpus_path: &std::path::Path) {
+        let (ifc_vc, policy_vc) = vector::train_from_corpus(corpus_path);
+        let ifc_size = ifc_vc.size();
+        let policy_size = policy_vc.size();
+        if let Ok(mut vc) = self.ifc_vector.lock() {
+            *vc = ifc_vc;
+        }
+        if let Ok(mut vc) = self.policy_vector.lock() {
+            *vc = policy_vc;
+        }
+        tracing::info!(ifc_docs = ifc_size, policy_docs = policy_size, "vector fast-path warmed from corpus");
     }
 
     /// Get the loaded policy set.
@@ -512,14 +541,29 @@ impl CedarPolicyHarness {
         if skip_llm {
             return Ok(Label::Public);
         }
+
+        // Fast-path: check vector classifier before calling the LLM.
+        if let Ok(vc) = self.ifc_vector.lock() {
+            if let Some(predicted) = vc.classify(content) {
+                debug!(label = %predicted, "IFC vector fast-path hit");
+                if let Ok(label) = predicted.parse::<Label>() {
+                    return Ok(label);
+                }
+            }
+        }
+
         match self.data_model.classify(content, source_agent).await {
-            Ok(classification) => Ok(classification.max_label()),
+            Ok(classification) => {
+                let label = classification.max_label();
+                // Feed result back to the vector classifier for future fast-path hits.
+                if let Ok(mut vc) = self.ifc_vector.lock() {
+                    vc.train(content, &label.to_string());
+                    vc.finalise();
+                }
+                Ok(label)
+            }
             Err(error) => {
-                warn!(
-                    %error,
-                    fail_mode = ?self.fail_mode,
-                    "data classifier failed; applying fail-mode policy"
-                );
+                warn!(%error, fail_mode = ?self.fail_mode, "data classifier failed; applying fail-mode policy");
                 match self.fail_mode {
                     FailMode::ClosedHard | FailMode::Escalate => Err(ClassifierUnavailable.into()),
                     _ => Ok(default_label_for(self.fail_mode)),
@@ -540,18 +584,28 @@ impl CedarPolicyHarness {
         if skip_llm {
             return Ok(default_classification_for(FailMode::Open));
         }
-        match self
-            .policy_model
-            .evaluate_content(content, source_agent)
-            .await
-        {
-            Ok(classification) => Ok(classification),
+
+        // Fast-path: check vector classifier before calling the LLM.
+        if let Ok(vc) = self.policy_vector.lock() {
+            if let Some(predicted) = vc.classify(content) {
+                debug!(verdict = %predicted, "policy vector fast-path hit");
+                let compliant = predicted == "compliant";
+                return Ok(PolicyClassification { compliant, violations: Vec::new() });
+            }
+        }
+
+        match self.policy_model.evaluate_content(content, source_agent).await {
+            Ok(classification) => {
+                // Feed result back to the vector classifier.
+                if let Ok(mut vc) = self.policy_vector.lock() {
+                    let verdict = if classification.compliant { "compliant" } else { "non-compliant" };
+                    vc.train(content, verdict);
+                    vc.finalise();
+                }
+                Ok(classification)
+            }
             Err(error) => {
-                warn!(
-                    %error,
-                    fail_mode = ?self.fail_mode,
-                    "policy classifier failed; applying fail-mode policy"
-                );
+                warn!(%error, fail_mode = ?self.fail_mode, "policy classifier failed; applying fail-mode policy");
                 match self.fail_mode {
                     FailMode::ClosedHard | FailMode::Escalate => Err(ClassifierUnavailable.into()),
                     _ => Ok(default_classification_for(self.fail_mode)),
