@@ -100,7 +100,7 @@ impl VertexCompleter {
         // Only minimise reasoning on the deployed vLLM endpoint (gpt-oss-safeguard).
         // The first-party OpenAI shim (Gemini) is non-reasoning and rejects reasoning_effort.
         let body = if self.config.vertex_endpoint_id.is_some() {
-            merge_reasoning_control(body, crate::Provider::Vertex.reasoning_disable_fields())
+            merge_reasoning_control(body, self.config.reasoning_control.clone())
         } else {
             body
         };
@@ -232,6 +232,7 @@ mod tests {
             vertex_location: Some("test-region".into()),
             vertex_endpoint_id: endpoint_id.map(String::from),
             vertex_project_number: project_number.map(String::from),
+            reasoning_control: None,
         }
     }
 
@@ -247,6 +248,7 @@ mod tests {
             vertex_location: None,
             vertex_endpoint_id: None,
             vertex_project_number: None,
+            reasoning_control: None,
         };
         assert!(matches!(
             VertexCompleter::new(cfg),

@@ -184,25 +184,6 @@ impl Provider {
         matches!(self, Provider::Openai | Provider::Vertex)
     }
 
-    /// Extra JSON body fields to disable reasoning/thinking, if the provider's API supports it.
-    /// Reasoning models waste latency and tokens on chain-of-thought the classifiers don't need;
-    /// they only require a small structured JSON verdict. Returns `None` for providers whose
-    /// models are non-reasoning by default (gpt-4o-mini, Haiku, Flash) or where the API rejects
-    /// the parameter (gpt-oss-safeguard's Harmony format).
-    pub fn reasoning_disable_fields(self) -> Option<Value> {
-        match self {
-            // z.ai: disable chain-of-thought via thinking.type=disabled (GLM-4.5+).
-            // reasoning_effort is GLM-5.2+ only and has no effect on 4.6.
-            Provider::Zai => Some(serde_json::json!({"thinking": {"type": "disabled"}})),
-            // Vertex deployed gpt-oss-safeguard rejects "none" (Harmony requires thinking)
-            // but accepts "low", which halves reasoning tokens and cuts ~1s of latency.
-            Provider::Vertex => Some(serde_json::json!({"reasoning_effort": "low"})),
-            // Non-reasoning models (gpt-4o-mini, Haiku, Flash) don't send the field.
-            // Ollama's gpt-oss-safeguard may reject it, so skip.
-            _ => None,
-        }
-    }
-
     /// Parse a provider name from a case-insensitive string.
     pub fn parse(name: &str) -> Result<Self, LlmError> {
         match name.trim().to_ascii_lowercase().as_str() {
@@ -250,6 +231,11 @@ pub struct LlmConfig {
     /// which needs the numeric project number (not the string id). If unset it is resolved
     /// automatically from `vertex_project` via the Cloud Resource Manager API.
     pub vertex_project_number: Option<String>,
+    /// Extra fields merged into the request body to control model reasoning/thinking.
+    /// Set via `SONDERA_REASONING_CONTROL` as a JSON object string.
+    /// Example: `{"thinking":{"type":"disabled"}}` for z.ai GLM models,
+    /// `{"reasoning_effort":"low"}` for deployed Vertex vLLM endpoints.
+    pub reasoning_control: Option<Value>,
 }
 
 impl LlmConfig {
@@ -293,6 +279,11 @@ impl LlmConfig {
             .ok()
             .filter(|s| !s.is_empty());
 
+        let reasoning_control = env::var("SONDERA_REASONING_CONTROL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| serde_json::from_str(&s).ok());
+
         Self {
             provider,
             model,
@@ -303,6 +294,7 @@ impl LlmConfig {
             vertex_location,
             vertex_endpoint_id,
             vertex_project_number,
+            reasoning_control,
         }
     }
 
@@ -333,6 +325,7 @@ impl Default for LlmConfig {
             vertex_location: Some("us-central1".to_string()),
             vertex_endpoint_id: None,
             vertex_project_number: None,
+            reasoning_control: None,
         }
     }
 }
@@ -677,6 +670,7 @@ mod tests {
             vertex_location: Some("europe-west1".into()),
             vertex_endpoint_id: None,
             vertex_project_number: None,
+            reasoning_control: None,
         };
         assert_eq!(
             cfg.effective_base_url(),

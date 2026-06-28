@@ -31,6 +31,7 @@ fn client(provider: Provider, server: &MockServer, api_key: Option<&str>) -> Llm
         vertex_location: None,
         vertex_endpoint_id: None,
         vertex_project_number: None,
+        reasoning_control: None,
     };
     LlmClient::try_new(config).expect("client should construct")
 }

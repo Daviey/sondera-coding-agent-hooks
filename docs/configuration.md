@@ -39,6 +39,7 @@ Selects which LLM serves the data-sensitivity (IFC) and secure-code (policy) cla
 | `SONDERA_TEMPERATURE` | sampling temperature, float | `0.0` |
 | `SONDERA_BASE_URL` | override the provider's base URL (proxies, gateways, self-hosted) | the provider's standard endpoint |
 | `SONDERA_SYSTEM_ENV` | path to the system env file | `/etc/sondera/env` |
+| `SONDERA_REASONING_CONTROL` | JSON object merged into the request body to control reasoning/thinking | unset (no reasoning control) |
 
 Default model per provider: `claude-haiku-4-5` (anthropic), `gpt-4o-mini` (openai), `gpt-oss-safeguard:20b` (ollama), `gemini-2.0-flash` (vertex), `glm-4.6` (zai).
 
@@ -54,6 +55,28 @@ IFC and policy normally share `SONDERA_MODEL`. Override each independently so on
 | `SONDERA_POLICY_MODEL` | the secure-code policy classifier |
 
 Both fall back to `SONDERA_MODEL` when unset. Provider, credentials, and base URL stay shared.
+
+## Reasoning control
+
+Reasoning models (z.ai GLM-4.6+, Vertex gpt-oss-safeguard) generate a chain-of-thought before answering, adding latency and tokens the classifiers don't need. `SONDERA_REASONING_CONTROL` accepts a JSON object that's merged into the request body to reduce or disable reasoning.
+
+Recommended values per model:
+
+| Model | Value | Effect |
+|---|---|---|
+| z.ai GLM-4.5+/4.6/5.x | `{"thinking":{"type":"disabled"}}` | Disables chain-of-thought entirely |
+| Vertex gpt-oss-safeguard (deployed) | `{"reasoning_effort":"low"}` | Minimal reasoning (Harmony rejects "none") |
+| Non-reasoning (Flash, Haiku, Mini) | unset | No effect needed |
+
+For Vertex, the field is only sent to deployed vLLM endpoints (when `VERTEX_ENDPOINT_ID` is set), not to the first-party Gemini shim.
+
+```bash
+# z.ai GLM models
+SONDERA_REASONING_CONTROL='{"thinking":{"type":"disabled"}}'
+
+# Vertex deployed endpoint
+SONDERA_REASONING_CONTROL='{"reasoning_effort":"low"}'
+```
 
 ## Credentials
 

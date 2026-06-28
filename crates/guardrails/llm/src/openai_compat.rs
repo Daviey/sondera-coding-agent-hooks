@@ -93,7 +93,7 @@ impl OpenAiCompatCompleter {
             schema,
             self.provider.supports_strict_json_schema(),
         );
-        let body = merge_reasoning_control(body, self.provider.reasoning_disable_fields());
+        let body = merge_reasoning_control(body, self.config.reasoning_control.clone());
         let started = std::time::Instant::now();
         let bearer = self.api_key.as_ref().map(|k| format!("Bearer {k}"));
         let ua = crate::user_agent(source_agent);
@@ -324,6 +324,7 @@ mod tests {
             vertex_location: None,
             vertex_endpoint_id: None,
             vertex_project_number: None,
+            reasoning_control: None,
         };
         assert!(OpenAiCompatCompleter::new(cfg).is_ok());
     }
@@ -340,6 +341,7 @@ mod tests {
             vertex_location: None,
             vertex_endpoint_id: None,
             vertex_project_number: None,
+            reasoning_control: None,
         };
         assert!(matches!(
             OpenAiCompatCompleter::new(without_key),
@@ -358,6 +360,7 @@ mod tests {
                 vertex_location: None,
                 vertex_endpoint_id: None,
                 vertex_project_number: None,
+                reasoning_control: None,
             }
         };
         assert!(OpenAiCompatCompleter::new(with_key).is_ok());
