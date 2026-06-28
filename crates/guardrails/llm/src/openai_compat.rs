@@ -179,10 +179,10 @@ pub(crate) fn build_json_object_body(
 /// Classifiers only need a JSON verdict, not a chain-of-thought. Returns the body unchanged when
 /// `fields` is `None`.
 pub(crate) fn merge_reasoning_control(mut body: Value, fields: Option<Value>) -> Value {
-    if let (Some(extra), Some(body_map)) = (fields, body.as_object_mut()) {
-        if let Some(extra_map) = extra.as_object() {
-            body_map.extend(extra_map.iter().map(|(k, v)| (k.clone(), v.clone())));
-        }
+    if let (Some(extra), Some(body_map)) = (fields, body.as_object_mut())
+        && let Some(extra_map) = extra.as_object()
+    {
+        body_map.extend(extra_map.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
     body
 }

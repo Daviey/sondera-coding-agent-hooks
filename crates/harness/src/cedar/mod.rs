@@ -108,10 +108,6 @@ pub struct CedarPolicyHarness {
     data_model: DataModel,
     policy_model: PolicyModel,
     fail_mode: FailMode,
-    /// When true, the classifier wrappers skip the LLM and return defaults instantly.
-    /// Set per-event in adjudicate(): Actions (pre-execution gates) run the LLM;
-    /// Observations (post-execution analysis) skip it for latency.
-    skip_llm: std::sync::atomic::AtomicBool,
 }
 
 impl CedarPolicyHarness {
@@ -270,7 +266,6 @@ impl CedarPolicyHarness {
             data_model,
             policy_model,
             fail_mode: FailMode::from_env(),
-            skip_llm: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -306,8 +301,8 @@ impl CedarPolicyHarness {
     /// Classify content sensitivity, substituting a fail-mode default if the IFC classifier
     /// errors (or returning [`ClassifierUnavailable`] under [`FailMode::ClosedHard`] so the caller
     /// can hard-deny). The successful label is the max sensitivity among matched label templates.
-    async fn classify_label(&self, content: &str) -> Result<Label> {
-        if self.skip_llm.load(std::sync::atomic::Ordering::Relaxed) {
+    async fn classify_label(&self, content: &str, skip_llm: bool) -> Result<Label> {
+        if skip_llm {
             return Ok(Label::Public);
         }
         match self.data_model.classify(content).await {
@@ -329,8 +324,8 @@ impl CedarPolicyHarness {
     /// Evaluate content against the policy templates, substituting a fail-mode default if the
     /// policy classifier errors (or returning [`ClassifierUnavailable`] under
     /// [`FailMode::ClosedHard`]).
-    async fn evaluate_policy(&self, content: &str) -> Result<PolicyClassification> {
-        if self.skip_llm.load(std::sync::atomic::Ordering::Relaxed) {
+    async fn evaluate_policy(&self, content: &str, skip_llm: bool) -> Result<PolicyClassification> {
+        if skip_llm {
             return Ok(default_classification_for(FailMode::Open));
         }
         match self.policy_model.evaluate_content(content).await {
@@ -430,11 +425,11 @@ impl Harness for CedarPolicyHarness {
         // Observations (post-execution analysis: command output, file contents, prompt text)
         // skip the LLM for latency — the deterministic YARA scan + Cedar still run, using the
         // trajectory's existing label. This cuts LLM calls from 3 per tool call to 1.
-        let is_action = matches!(event.event, TrajectoryEvent::Action(_));
-        self.skip_llm
-            .store(!is_action, std::sync::atomic::Ordering::Relaxed);
+        // The flag is passed by value (not shared mutable state) so concurrent adjudicate calls
+        // on the same harness cannot race.
+        let skip_llm = !matches!(event.event, TrajectoryEvent::Action(_));
 
-        let (adjudicated, raw) = match self.build_request(&event).await {
+        let (adjudicated, raw) = match self.build_request(&event, skip_llm).await {
             Ok(request) => {
                 let response = self.is_authorized(&request)?;
                 let adjudicated = self.response_to_adjudicated(&response);
