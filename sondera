@@ -18,7 +18,7 @@ set -euo pipefail
 # Install:  ln -s /path/to/godera/sondera ~/.local/bin/sondera
 #           (or just run it directly)
 #
-# Config:   ~/.sondera/env  (provider, model, credentials — NOT committed)
+# Config:   ~/.sondera/env  (provider, model, credentials - NOT committed)
 
 # ── resolve repo path ────────────────────────────────────────────────────
 
@@ -34,10 +34,10 @@ SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 # The repo root contains Cargo.toml + policies/
 SONDERA="${SONDERA_HOME:-$SCRIPT_DIR}"
 [[ -f "$SONDERA/Cargo.toml" && -d "$SONDERA/policies" ]] \
-  || die "cannot find sondera repo at $SONDERA — set SONDERA_HOME"
+  || die "cannot find sondera repo at $SONDERA - set SONDERA_HOME"
 
 POLICIES="$SONDERA/policies"
-# Prefer release, fall back to debug — check actual binary existence
+# Prefer release, fall back to debug - check actual binary existence
 if [[ -x "$SONDERA/target/release/sondera-harness-server" ]]; then
   BIN="$SONDERA/target/release"
 else
@@ -140,7 +140,7 @@ start_server() {
     if health_check; then
       log "server started (pid $pid)"
     else
-      log "server failed — check $LOG_FILE"
+      log "server failed - check $LOG_FILE"
       rm -f "$PID_FILE"
       exit 1
     fi
@@ -197,6 +197,53 @@ install_opencode() {
   log "run 'sondera start -d' before launching opencode."
 }
 
+# Inject sondera hooks into the agent config for this session only, then restore
+# the original on exit. This keeps the global config clean: sondera is only
+# active when launched through this wrapper.
+launch_claude() {
+  health_check || start_server -d
+  local cfg="$HOME/.claude/settings.json"
+  local backup=""
+  if [[ -f "$cfg" ]]; then
+    backup=$(mktemp)
+    cp "$cfg" "$backup"
+    "$BIN/sondera-claude" install --user 2>/dev/null
+    trap '[ -n "$backup" ] && cp "$backup" "$cfg" && rm -f "$backup"' EXIT INT TERM
+  fi
+  claude "$@"
+  local rc=$?
+  if [[ -n "$backup" ]]; then
+    cp "$backup" "$cfg"
+    rm -f "$backup"
+    trap - EXIT INT TERM
+  fi
+  exit $rc
+}
+
+launch_opencode() {
+  health_check || start_server -d
+  local cfg="$HOME/.config/opencode/opencode.json"
+  local plugin="file://$SONDERA/plugins/opencode/src/index.ts"
+  local backup=""
+  mkdir -p "$(dirname "$cfg")"
+  [[ -f "$cfg" ]] || echo '{"$schema":"https://opencode.ai/config.json","plugin":[]}' > "$cfg"
+  if ! grep -q "sondera" "$cfg" 2>/dev/null; then
+    backup=$(mktemp)
+    cp "$cfg" "$backup"
+    local tmp; tmp=$(mktemp)
+    jq --arg p "$plugin" '.plugin = ((.plugin // []) + [$p])' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+    trap '[ -n "$backup" ] && cp "$backup" "$cfg" && rm -f "$backup"' EXIT INT TERM
+  fi
+  opencode "$@"
+  local rc=$?
+  if [[ -n "$backup" ]]; then
+    cp "$backup" "$cfg"
+    rm -f "$backup"
+    trap - EXIT INT TERM
+  fi
+  exit $rc
+}
+
 # ── main ─────────────────────────────────────────────────────────────────
 
 cmd="${1:-help}"
@@ -212,25 +259,28 @@ case "$cmd" in
               opencode) install_opencode ;;
               *) die "usage: sondera install <claude|opencode>" ;;
             esac ;;
-  claude)   health_check || start_server -d; exec claude "$@" ;;
-  opencode) health_check || start_server -d; exec opencode "$@" ;;
+  claude)   launch_claude "$@" ;;
+  opencode) launch_opencode "$@" ;;
   bench)    ensure_env || exit 1; exec "$BIN/sondera-benchmark" \
               --corpus "$SONDERA/benchmarks/corpus.jsonl" --policies "$POLICIES" "$@" ;;
   help|--help|-h)
     cat <<'USAGE'
-sondera — coding agent guardrail launcher
+sondera - coding agent guardrail launcher
 
   start [-d]       Start harness server (-d = background)
   stop             Stop harness server
   restart          Restart harness server
   status           Show server health and stats
-  install <agent>  Install hooks (claude or opencode)
-  claude [args]    Launch claude with guardrails
-  opencode [args]  Launch opencode with guardrails
+  install <agent>  Permanently install hooks (claude or opencode)
+  claude [args]    Launch claude with guardrails (hooks auto-injected for this session)
+  opencode [args]  Launch opencode with guardrails (plugin auto-injected for this session)
   bench [args]     Run benchmark
   help             This message
 
-Config: ~/.sondera/env (NOT committed — your credentials)
+Hooks are injected into the agent config for the session only and restored
+on exit. The global config stays clean unless you use 'install'.
+
+Config: ~/.sondera/env (NOT committed - your credentials)
 USAGE
     ;;
   *) die "unknown command: $cmd (try 'sondera help')" ;;
