@@ -39,6 +39,7 @@ pub struct ServerStats {
     pub events_total: u64,
     pub allows: u64,
     pub denies: u64,
+    pub escalations: u64,
     pub errors: u64,
 }
 
@@ -48,6 +49,7 @@ struct Counters {
     events_total: AtomicU64,
     allows: AtomicU64,
     denies: AtomicU64,
+    escalations: AtomicU64,
     errors: AtomicU64,
 }
 
@@ -58,6 +60,7 @@ impl Counters {
             events_total: AtomicU64::new(0),
             allows: AtomicU64::new(0),
             denies: AtomicU64::new(0),
+            escalations: AtomicU64::new(0),
             errors: AtomicU64::new(0),
         }
     }
@@ -68,6 +71,7 @@ impl Counters {
             events_total: self.events_total.load(Ordering::Relaxed),
             allows: self.allows.load(Ordering::Relaxed),
             denies: self.denies.load(Ordering::Relaxed),
+            escalations: self.escalations.load(Ordering::Relaxed),
             errors: self.errors.load(Ordering::Relaxed),
         }
     }
@@ -116,8 +120,11 @@ impl<H: Harness + 'static> HarnessService for HarnessServer<H> {
         match self.harness.adjudicate(event).await {
             Ok(result) => {
                 match result.decision {
-                    Decision::Allow | Decision::Escalate => {
+                    Decision::Allow => {
                         self.counters.allows.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Decision::Escalate => {
+                        self.counters.escalations.fetch_add(1, Ordering::Relaxed);
                     }
                     Decision::Deny => {
                         self.counters.denies.fetch_add(1, Ordering::Relaxed);
@@ -337,6 +344,7 @@ mod tests {
         let stats = client.stats().await.unwrap();
         assert_eq!(stats.events_total, 1);
         assert_eq!(stats.allows, 1);
+        assert_eq!(stats.escalations, 0);
         assert_eq!(stats.denies, 0);
 
         // Cleanup.

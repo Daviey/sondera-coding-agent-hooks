@@ -75,7 +75,7 @@ For a live snapshot, query the stats endpoint from any adapter binary:
 sondera-opencode-adapter stats
 ```
 
-Returns event counts (total, allows, denies, errors) and server uptime. Useful for monitoring dashboards or health checks in deployment scripts.
+Returns event counts (total, allows, denies, escalations, errors) and server uptime. Useful for monitoring dashboards or health checks in deployment scripts.
 
 ## Graceful shutdown
 

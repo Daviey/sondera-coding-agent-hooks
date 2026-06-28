@@ -299,7 +299,7 @@ Usage: sondera-opencode-adapter <command>
 
 Commands:
   health       Check if the harness server is reachable
-  stats        Print server statistics (event counts, uptime, allow/deny)
+  stats        Print server statistics (event counts, uptime, allow/deny/escalate)
   adjudicate   Read one JSON event from stdin, return adjudication on stdout
   stream       Read NDJSON events from stdin, return NDJSON adjudications
 

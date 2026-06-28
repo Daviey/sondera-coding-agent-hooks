@@ -124,7 +124,7 @@ For a quick snapshot without verbose logs, use the stats subcommand from any ada
 sondera-opencode-adapter stats
 ```
 
-This prints event counts (total, allows, denies, errors) and server uptime as JSON.
+This prints event counts (total, allows, denies, escalations, errors) and server uptime as JSON.
 
 ## Harness server command line
 
