@@ -42,6 +42,8 @@ Selects which LLM serves the data-sensitivity (IFC) and secure-code (policy) cla
 
 Default model per provider: `claude-haiku-4-5` (anthropic), `gpt-4o-mini` (openai), `gpt-oss-safeguard:20b` (ollama), `gemini-2.0-flash` (vertex), `glm-4.6` (zai).
 
+Reasoning models (such as `gpt-oss-safeguard-20b`) produce a chain-of-thought before each answer, adding 1 to 5 seconds per classification. For lower latency, choose a non-reasoning model (Haiku, Flash, `gpt-4o-mini`). The classifiers run concurrently, so the per-call latency is the slower of IFC and policy. Repeat content is served from the LRU cache (no LLM call).
+
 ## Per-classifier model
 
 IFC and policy normally share `SONDERA_MODEL`. Override each independently so one classifier can run a cheaper model than the other:

@@ -40,7 +40,7 @@ export function loadConfig(directory: string): SonderaConfig {
   const allowPatterns = loadAllowPatterns(project.allowPatterns)
   const adjudicateTimeoutMs = process.env.SONDERA_ADJUDICATE_TIMEOUT_MS !== undefined
     ? parseInt(process.env.SONDERA_ADJUDICATE_TIMEOUT_MS, 10)
-    : (project.adjudicateTimeoutMs ?? 5000)
+    : (project.adjudicateTimeoutMs ?? 15000)
 
   return { enabled, dryRun, allowPatterns, auditLogPath, strictMode, harnessPath, policiesPath, adjudicateTimeoutMs }
 }

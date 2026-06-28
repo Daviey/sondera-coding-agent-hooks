@@ -52,7 +52,7 @@ All settings can go in `~/.sondera/env`, a per-project `.opencode/sondera.json`,
 | `SONDERA_SOCKET` | harness default | Unix socket the adapter connects to |
 | `SONDERA_ALLOW_PATTERNS` | (none) | comma-separated regexes; matching tool calls skip adjudication |
 | `SONDERA_AUDIT_LOG` | (none) | JSONL file recording every adjudication |
-| `SONDERA_ADJUDICATE_TIMEOUT_MS` | `5000` | per-call timeout before fail-open |
+| `SONDERA_ADJUDICATE_TIMEOUT_MS` | `15000` | per-call timeout before fail-open |
 
 The harness runs deterministically (Cedar and YARA only) when no LLM provider is configured. To enable the LLM-based classifiers, set `SONDERA_PROVIDER` and credentials in `~/.sondera/env` (see [`docs/configuration.md`](../../docs/configuration.md)); there is no separate "deterministic" flag.
 
