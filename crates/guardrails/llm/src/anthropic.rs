@@ -62,6 +62,7 @@ impl AnthropicCompleter {
         user: &str,
         schema: Value,
         timeout: Duration,
+        source_agent: &str,
     ) -> Result<Value, LlmError> {
         let schema = harden_schema(schema);
         let body = json!({
@@ -78,6 +79,7 @@ impl AnthropicCompleter {
         let url = format!("{}/v1/messages", self.config.effective_base_url());
         let http = &self.http;
         let api_key = &self.api_key;
+        let ua = crate::user_agent(source_agent);
         let started = std::time::Instant::now();
         let result: Result<(Value, crate::Usage), LlmError> = async {
             let response = crate::send_with_retry(
@@ -86,6 +88,7 @@ impl AnthropicCompleter {
                         .header("x-api-key", api_key)
                         .header("anthropic-version", ANTHROPIC_VERSION)
                         .header("content-type", "application/json")
+                        .header("User-Agent", &ua)
                         .json(&body)
                 },
                 timeout,

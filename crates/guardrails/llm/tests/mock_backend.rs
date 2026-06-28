@@ -77,7 +77,7 @@ async fn openai_sends_strict_json_schema() {
 
     let client = client(Provider::Openai, &server, Some("sk-test"));
     let value = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(5))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(5), "test")
         .await
         .expect("call should succeed");
 
@@ -111,7 +111,7 @@ async fn openai_sends_bearer_auth() {
 
     let client = client(Provider::Openai, &server, Some("sk-test"));
     let _ = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2), "test")
         .await;
 
     let req = received_request(&server).await;
@@ -134,7 +134,7 @@ async fn zai_falls_back_to_json_object_with_schema_in_prompt() {
 
     let client = client(Provider::Zai, &server, Some("zai-key"));
     let _ = client
-        .complete_json_as::<Verdict>("classify.", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("classify.", "hello", Duration::from_secs(2), "test")
         .await;
 
     let body = received_body(&server).await;
@@ -168,7 +168,7 @@ async fn ollama_sends_no_auth_header() {
 
     let client = client(Provider::Ollama, &server, None);
     let _ = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2), "test")
         .await;
 
     let req = received_request(&server).await;
@@ -192,7 +192,7 @@ async fn http_error_surfaces_status_and_message() {
 
     let client = client(Provider::Openai, &server, Some("sk-test"));
     let err = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2), "test")
         .await
         .expect_err("should error");
 
@@ -227,7 +227,7 @@ async fn empty_content_is_no_content_error() {
 
     let client = client(Provider::Openai, &server, Some("sk-test"));
     let err = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2), "test")
         .await
         .expect_err("should error");
     assert!(matches!(err, LlmError::NoContent), "got {err:?}");
@@ -249,7 +249,7 @@ async fn anthropic_sends_structured_output_config_and_api_key() {
 
     let client = client(Provider::Anthropic, &server, Some("sk-anthropic"));
     let value = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(5))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(5), "test")
         .await
         .expect("call should succeed");
     assert_eq!(value.violation, 0);
@@ -279,7 +279,7 @@ async fn retries_on_transient_429() {
 
     let client = client(Provider::Openai, &server, Some("sk-test"));
     let err = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2), "test")
         .await
         .expect_err("should error after retries");
 
@@ -311,7 +311,7 @@ async fn lenient_parse_strips_code_fence() {
 
     let client = client(Provider::Zai, &server, Some("zai-key"));
     let value = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2), "test")
         .await
         .expect("fenced JSON should parse leniently");
     assert_eq!(value.violation, 1);
@@ -331,7 +331,7 @@ async fn lenient_parse_extracts_json_from_prose() {
 
     let client = client(Provider::Zai, &server, Some("zai-key"));
     let value = client
-        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2))
+        .complete_json_as::<Verdict>("sys", "hello", Duration::from_secs(2), "test")
         .await
         .expect("prose-wrapped JSON should parse leniently");
     assert_eq!(value.violation, 0);

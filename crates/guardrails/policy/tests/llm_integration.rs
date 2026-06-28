@@ -64,7 +64,7 @@ def get_user(user_id):
     cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")
     return cursor.fetchone()
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert_non_compliant(&result, "Injection");
 }
 
@@ -77,7 +77,7 @@ def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
     return cursor.fetchone()
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     let violations = result.violations_by_category("Injection");
     assert!(
         violations.is_empty(),
@@ -95,7 +95,7 @@ import os
 def ping_host(hostname):
     os.system(f"ping -c 1 {hostname}")
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert_non_compliant(&result, "Injection");
 }
 
@@ -112,7 +112,7 @@ API_KEY = "sk-live-abc123xyz789"
 headers = {"Authorization": f"Bearer {API_KEY}"}
 response = requests.get("https://api.example.com/data", headers=headers)
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert_non_compliant(&result, "Secrets Exposure");
 }
 
@@ -126,7 +126,7 @@ api_key = os.environ["API_KEY"]
 headers = {"Authorization": f"Bearer {api_key}"}
 response = requests.get("https://api.example.com/data", headers=headers)
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     let violations = result.violations_by_category("Secrets Exposure");
     assert!(
         violations.is_empty(),
@@ -148,7 +148,7 @@ import hashlib
 def hash_password(password):
     return hashlib.md5(password.encode()).hexdigest()
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert_non_compliant(&result, "Weak Cryptography");
 }
 
@@ -161,7 +161,7 @@ import bcrypt
 def hash_password(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt())
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     let violations = result.violations_by_category("Weak Cryptography");
     assert!(
         violations.is_empty(),
@@ -184,7 +184,7 @@ def handle_request(request):
     data = pickle.loads(request.body)
     return process(data)
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert_non_compliant(&result, "Insecure Deserialization");
 }
 
@@ -198,7 +198,7 @@ def handle_request(request):
     data = json.loads(request.body)
     return process(data)
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     let violations = result.violations_by_category("Insecure Deserialization");
     assert!(
         violations.is_empty(),
@@ -221,7 +221,7 @@ def delete_user(id):
     db.delete_user(id)
     return {"ok": True}
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert_non_compliant(&result, "Broken Access Control");
 }
 
@@ -238,7 +238,7 @@ def delete_user(id):
     db.delete_user(id)
     return {"ok": True}
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     let violations = result.violations_by_category("Broken Access Control");
     assert!(
         violations.is_empty(),
@@ -261,7 +261,7 @@ fn read_upload(user_filename: &str) -> std::io::Result<Vec<u8>> {
     std::fs::read(path)
 }
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert_non_compliant(&result, "Path Traversal");
 }
 
@@ -280,7 +280,7 @@ fn read_upload(user_filename: &str) -> anyhow::Result<Vec<u8>> {
     Ok(std::fs::read(requested)?)
 }
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     let violations = result.violations_by_category("Path Traversal");
     assert!(
         violations.is_empty(),
@@ -325,7 +325,7 @@ async fn single_policy_injection_only() {
 
     let model = single_policy_model(policy);
     let code = r#"db.query(f"DELETE FROM orders WHERE id = {order_id}")"#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert!(!result.compliant);
     assert_eq!(result.violations.len(), 1);
 }
@@ -346,7 +346,7 @@ async fn evaluate_conversation_with_violation() {
     return cursor.fetchall()"#,
         ),
     ];
-    let result = model.evaluate(&history).await.unwrap();
+    let result = model.evaluate(&history, "test").await.unwrap();
     assert!(!result.compliant);
 }
 
@@ -398,7 +398,7 @@ def load_config():
     with open(config_path) as f:
         return json.load(f)
 "#;
-    let result = model.evaluate_content(code).await.unwrap();
+    let result = model.evaluate_content(code, "test").await.unwrap();
     assert!(
         result.compliant,
         "Well-written code should pass all baseline policies, got: {}",

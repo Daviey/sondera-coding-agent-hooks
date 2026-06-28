@@ -85,6 +85,7 @@ impl VertexCompleter {
         user: &str,
         schema: Value,
         timeout: Duration,
+        source_agent: &str,
     ) -> Result<Value, LlmError> {
         let bearer = format!("Bearer {}", self.bearer_token().await?);
         let url = self.endpoint().await?;
@@ -104,8 +105,9 @@ impl VertexCompleter {
             body
         };
         debug!(url = %url, model = %self.config.model, "vertex request");
+        let ua = crate::user_agent(source_agent);
         let started = std::time::Instant::now();
-        let result = send_and_parse(&self.http, &url, &body, Some(&bearer), timeout).await;
+        let result = send_and_parse(&self.http, &url, &body, Some(&bearer), timeout, &ua).await;
         let elapsed = started.elapsed();
         match &result {
             Ok((_, usage)) => tracing::info!(
@@ -326,6 +328,7 @@ mod tests {
                 "Hello, how are you doing today?",
                 schema,
                 Duration::from_secs(30),
+                "test",
             )
             .await
             .expect("live Vertex call should succeed");

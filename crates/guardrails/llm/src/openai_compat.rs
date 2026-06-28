@@ -82,6 +82,7 @@ impl OpenAiCompatCompleter {
         user: &str,
         schema: Value,
         timeout: Duration,
+        source_agent: &str,
     ) -> Result<Value, LlmError> {
         let url = format!("{}/chat/completions", self.config.effective_base_url());
         let body = build_json_object_body(
@@ -95,7 +96,8 @@ impl OpenAiCompatCompleter {
         let body = merge_reasoning_control(body, self.provider.reasoning_disable_fields());
         let started = std::time::Instant::now();
         let bearer = self.api_key.as_ref().map(|k| format!("Bearer {k}"));
-        let result = send_and_parse(&self.http, &url, &body, bearer.as_deref(), timeout).await;
+        let ua = crate::user_agent(source_agent);
+        let result = send_and_parse(&self.http, &url, &body, bearer.as_deref(), timeout, &ua).await;
         let elapsed = started.elapsed();
         match &result {
             Ok((_, usage)) => tracing::info!(
@@ -197,11 +199,13 @@ pub(crate) async fn send_and_parse(
     body: &Value,
     bearer: Option<&str>,
     timeout: Duration,
+    user_agent: &str,
 ) -> Result<(Value, crate::Usage), LlmError> {
     let build = || {
         let mut request = http
             .post(url)
             .header("content-type", "application/json")
+            .header("User-Agent", user_agent)
             .json(body);
         if let Some(value) = bearer {
             request = request.header("authorization", value);

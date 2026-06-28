@@ -78,7 +78,7 @@ async fn main() {
     let model = PolicyModel::with_config(policies, config);
 
     // Evaluate.
-    let classification = match model.evaluate_content(&content).await {
+    let classification = match model.evaluate_content(&content, "policy-eval").await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Policy evaluation failed: {}", e);

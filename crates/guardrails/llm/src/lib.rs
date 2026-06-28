@@ -62,6 +62,11 @@ pub use vertex::VertexCompleter;
 /// Default per-call timeout for a classification request, in seconds.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Build a User-Agent string identifying the source agent and sondera version.
+pub(crate) fn user_agent(source_agent: &str) -> String {
+    format!("{} sondera/{}", source_agent, env!("CARGO_PKG_VERSION"))
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -413,12 +418,22 @@ impl LlmClient {
         user: &str,
         schema: Value,
         timeout: Duration,
+        source_agent: &str,
     ) -> Result<Value, LlmError> {
         self.breaker.before_call()?;
         let result = match &self.backend {
-            LlmBackend::Anthropic(c) => c.complete_json(system, user, schema, timeout).await,
-            LlmBackend::OpenAiCompat(c) => c.complete_json(system, user, schema, timeout).await,
-            LlmBackend::Vertex(c) => c.complete_json(system, user, schema, timeout).await,
+            LlmBackend::Anthropic(c) => {
+                c.complete_json(system, user, schema, timeout, source_agent)
+                    .await
+            }
+            LlmBackend::OpenAiCompat(c) => {
+                c.complete_json(system, user, schema, timeout, source_agent)
+                    .await
+            }
+            LlmBackend::Vertex(c) => {
+                c.complete_json(system, user, schema, timeout, source_agent)
+                    .await
+            }
         };
         match &result {
             Ok(_) => self.breaker.on_success(),
@@ -438,12 +453,15 @@ impl LlmClient {
         system: &str,
         user: &str,
         timeout: Duration,
+        source_agent: &str,
     ) -> Result<T, LlmError>
     where
         T: DeserializeOwned + JsonSchema,
     {
         let schema = schema_for::<T>();
-        let value = self.complete_json(system, user, schema, timeout).await?;
+        let value = self
+            .complete_json(system, user, schema, timeout, source_agent)
+            .await?;
         Ok(serde_json::from_value(value)?)
     }
 }

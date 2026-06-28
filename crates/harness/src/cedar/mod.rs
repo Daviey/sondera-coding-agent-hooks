@@ -301,11 +301,16 @@ impl CedarPolicyHarness {
     /// Classify content sensitivity, substituting a fail-mode default if the IFC classifier
     /// errors (or returning [`ClassifierUnavailable`] under [`FailMode::ClosedHard`] so the caller
     /// can hard-deny). The successful label is the max sensitivity among matched label templates.
-    async fn classify_label(&self, content: &str, skip_llm: bool) -> Result<Label> {
+    async fn classify_label(
+        &self,
+        content: &str,
+        skip_llm: bool,
+        source_agent: &str,
+    ) -> Result<Label> {
         if skip_llm {
             return Ok(Label::Public);
         }
-        match self.data_model.classify(content).await {
+        match self.data_model.classify(content, source_agent).await {
             Ok(classification) => Ok(classification.max_label()),
             Err(error) => {
                 warn!(
@@ -324,11 +329,20 @@ impl CedarPolicyHarness {
     /// Evaluate content against the policy templates, substituting a fail-mode default if the
     /// policy classifier errors (or returning [`ClassifierUnavailable`] under
     /// [`FailMode::ClosedHard`]).
-    async fn evaluate_policy(&self, content: &str, skip_llm: bool) -> Result<PolicyClassification> {
+    async fn evaluate_policy(
+        &self,
+        content: &str,
+        skip_llm: bool,
+        source_agent: &str,
+    ) -> Result<PolicyClassification> {
         if skip_llm {
             return Ok(default_classification_for(FailMode::Open));
         }
-        match self.policy_model.evaluate_content(content).await {
+        match self
+            .policy_model
+            .evaluate_content(content, source_agent)
+            .await
+        {
             Ok(classification) => Ok(classification),
             Err(error) => {
                 warn!(
@@ -429,7 +443,8 @@ impl Harness for CedarPolicyHarness {
         // on the same harness cannot race.
         let skip_llm = !matches!(event.event, TrajectoryEvent::Action(_));
 
-        let (adjudicated, raw) = match self.build_request(&event, skip_llm).await {
+        let source_agent = &event.agent.provider_id;
+        let (adjudicated, raw) = match self.build_request(&event, skip_llm, source_agent).await {
             Ok(request) => {
                 let response = self.is_authorized(&request)?;
                 let adjudicated = self.response_to_adjudicated(&response);

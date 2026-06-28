@@ -274,6 +274,7 @@ impl PolicyModel {
     pub async fn evaluate_content(
         &self,
         content: &str,
+        source_agent: &str,
     ) -> Result<PolicyClassification, PolicyError> {
         if self.policies.is_empty() {
             return Err(PolicyError::NoPolicies);
@@ -306,7 +307,14 @@ impl PolicyModel {
         let policies = &self.policies;
         let results: Vec<Result<PolicyModelResult, PolicyError>> =
             futures::stream::iter(0..policies.len())
-                .map(|i| self.evaluate_single(&policies[i], content, Duration::from_secs(30)))
+                .map(|i| {
+                    self.evaluate_single(
+                        &policies[i],
+                        content,
+                        Duration::from_secs(30),
+                        source_agent,
+                    )
+                })
                 .buffered(CONCURRENCY)
                 .collect()
                 .await;
@@ -344,6 +352,7 @@ impl PolicyModel {
     pub async fn evaluate(
         &self,
         history: &[ConversationMessage],
+        source_agent: &str,
     ) -> Result<PolicyClassification, PolicyError> {
         if history.is_empty() {
             return Err(PolicyError::InvalidContent(
@@ -352,7 +361,7 @@ impl PolicyModel {
         }
 
         let content = Self::format_conversation(history);
-        self.evaluate_content(&content).await
+        self.evaluate_content(&content, source_agent).await
     }
 
     /// Get the configured policy templates.
@@ -381,7 +390,7 @@ impl PolicyModel {
     /// Use this at startup to fail fast if the API is unavailable.
     pub async fn health_check(&self) -> Result<(), PolicyError> {
         if let Some(policy) = self.policies.first() {
-            self.evaluate_single(policy, "health check", Duration::from_secs(5))
+            self.evaluate_single(policy, "health check", Duration::from_secs(5), "health")
                 .await?;
             Ok(())
         } else {
@@ -396,6 +405,7 @@ impl PolicyModel {
         policy: &PolicyTemplate,
         content: &str,
         timeout: Duration,
+        source_agent: &str,
     ) -> Result<PolicyModelResult, PolicyError> {
         let client = self.client.as_ref().ok_or_else(|| {
             PolicyError::ModelNotAvailable(
@@ -408,7 +418,12 @@ impl PolicyModel {
         let user_prompt = policy.render_user_message(content);
 
         let result = client
-            .complete_json_as::<PolicyModelResult>(&system_prompt, &user_prompt, timeout)
+            .complete_json_as::<PolicyModelResult>(
+                &system_prompt,
+                &user_prompt,
+                timeout,
+                source_agent,
+            )
             .await?;
 
         Ok(result)

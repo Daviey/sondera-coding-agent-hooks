@@ -203,6 +203,7 @@ impl DataModel {
     pub async fn classify(
         &self,
         content: &str,
+        source_agent: &str,
     ) -> Result<SensitivityClassification, DataClassificationError> {
         if self.labels.is_empty() {
             return Err(DataClassificationError::NoLabels);
@@ -230,7 +231,9 @@ impl DataModel {
         let labels = &self.labels;
         let results: Vec<Result<SensitivityModelResult, DataClassificationError>> =
             futures::stream::iter(0..labels.len())
-                .map(|i| self.classify_single(&labels[i], content, Duration::from_secs(30)))
+                .map(|i| {
+                    self.classify_single(&labels[i], content, Duration::from_secs(30), source_agent)
+                })
                 .buffered(CONCURRENCY)
                 .collect()
                 .await;
@@ -288,7 +291,7 @@ impl DataModel {
     /// Use this at startup to fail fast if the API key is missing or the API is unavailable.
     pub async fn health_check(&self) -> Result<(), DataClassificationError> {
         if let Some(label) = self.labels.first() {
-            self.classify_single(label, "health check", Duration::from_secs(5))
+            self.classify_single(label, "health check", Duration::from_secs(5), "health")
                 .await?;
             Ok(())
         } else {
@@ -303,6 +306,7 @@ impl DataModel {
         label: &LabelTemplate,
         content: &str,
         timeout: Duration,
+        source_agent: &str,
     ) -> Result<SensitivityModelResult, DataClassificationError> {
         let client = self.client.as_ref().ok_or_else(|| {
             DataClassificationError::ModelNotAvailable(
@@ -315,7 +319,12 @@ impl DataModel {
         let user_prompt = label.render_user_message(content);
 
         let result = client
-            .complete_json_as::<SensitivityModelResult>(&system_prompt, &user_prompt, timeout)
+            .complete_json_as::<SensitivityModelResult>(
+                &system_prompt,
+                &user_prompt,
+                timeout,
+                source_agent,
+            )
             .await?;
 
         Ok(result)
@@ -428,7 +437,10 @@ mod tests {
         let key = cache_key("the same content twice");
         model.cache.lock().unwrap().put(key, cached.clone());
 
-        let result = model.classify("the same content twice").await.unwrap();
+        let result = model
+            .classify("the same content twice", "test")
+            .await
+            .unwrap();
         assert!(!result.is_public);
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.findings[0].label, Label::HighlyConfidential);
