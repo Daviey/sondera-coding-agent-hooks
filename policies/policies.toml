@@ -26,6 +26,16 @@ environment variables for secrets, safe deserialization, strong cryptography, \
 proper authorization checks, and canonicalized paths."""
 
 [[policies.categories]]
+code = "SC1"
+name = "Destructive Operations"
+definition = """\
+Commands or code that cause irreversible data loss, system damage, or \
+history rewriting. Includes: rm -rf on root/home/system dirs, \
+git reset --hard, git push --force, git clean -fd, git filter-branch, \
+DROP TABLE/TRUNCATE without safeguards, mkfs, dd to block devices, shred, \
+and force-deleting lockfiles, config files, or security-related files."""
+
+[[policies.categories]]
 code = "SC2"
 name = "Injection"
 definition = """\
@@ -93,6 +103,42 @@ content = "cursor.execute(f\"SELECT * FROM users WHERE id = {user_id}\")"
 violation = true
 category = "SC2"
 
+# Destructive Operations
+[[policies.examples]]
+content = "rm -rf /"
+violation = true
+category = "SC1"
+
+[[policies.examples]]
+content = "rm -rf /home/user"
+violation = true
+category = "SC1"
+
+[[policies.examples]]
+content = "git reset --hard HEAD~10"
+violation = true
+category = "SC1"
+
+[[policies.examples]]
+content = "git push --force origin main"
+violation = true
+category = "SC1"
+
+[[policies.examples]]
+content = "DROP TABLE users;"
+violation = true
+category = "SC1"
+
+[[policies.examples]]
+content = "mkfs.ext4 /dev/sda"
+violation = true
+category = "SC1"
+
+[[policies.examples]]
+content = "git checkout feature-branch"
+violation = false
+category = "SC0"
+
 [[policies.examples]]
 content = "cursor.execute(\"SELECT * FROM users WHERE id = %s\", (user_id,))"
 violation = false
@@ -149,6 +195,11 @@ category = "SC0"
 content = "password_hash = hashlib.md5(password.encode()).hexdigest()"
 violation = true
 category = "SC6"
+
+[[policies.examples]]
+content = "digest = hashlib.sha256(data.encode()).hexdigest()"
+violation = false
+category = "SC0"
 
 [[policies.examples]]
 content = "password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())"

