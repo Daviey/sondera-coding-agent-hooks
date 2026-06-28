@@ -142,7 +142,7 @@ impl Provider {
             Provider::Anthropic => "claude-haiku-4-5",
             Provider::Openai => "gpt-4o-mini",
             Provider::Ollama => "gpt-oss-safeguard:20b",
-            Provider::Vertex => "gemini-2.0-flash",
+            Provider::Vertex => "google/gemini-2.5-flash",
             Provider::Zai => "glm-4.5-flash",
         }
     }
