@@ -28,7 +28,7 @@ dirs = "6"
 fjall = "3"
 turso = "0.4"
 schemars = { version = "1.2", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "signal"] }
 thiserror = "2"
 tarpc = { version = "0.37", features = ["tokio1", "serde1", "serde-transport", "unix"] }
 tokio-serde = { version = "0.9", features = ["json"] }

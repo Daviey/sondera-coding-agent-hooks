@@ -72,6 +72,9 @@ impl<H: Harness + 'static> HarnessService for HarnessServer<H> {
 }
 
 /// Spawn a tarpc server listening on a Unix socket.
+///
+/// Handles SIGINT and SIGTERM gracefully: stops accepting new connections and
+/// removes the socket file before returning.
 pub async fn serve<H>(harness: H, socket_path: &Path) -> Result<()>
 where
     H: Harness + 'static,
@@ -94,24 +97,61 @@ where
     // 64 MB — generous enough for large Cedar contexts/policies,
     // bounded enough to prevent OOM from malformed messages.
     listener.config_mut().max_frame_length(64 * 1024 * 1024);
-    while let Some(accept_result) = listener.next().await {
-        match accept_result {
-            Ok(transport) => {
-                let server = server.clone();
-                tokio::spawn(async move {
-                    let channel = BaseChannel::with_defaults(transport);
-                    channel
-                        .execute(server.serve())
-                        .for_each(|response| async move {
-                            tokio::spawn(response);
-                        })
-                        .await;
-                });
-            }
-            Err(e) => {
-                tracing::error!("Error accepting connection: {}", e);
+
+    let shutdown = async {
+        let ctrl_c = tokio::signal::ctrl_c();
+        tokio::pin!(ctrl_c);
+        #[cfg(unix)]
+        {
+            let term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
+            if let Ok(mut term) = term {
+                tokio::select! {
+                    _ = &mut ctrl_c => {}
+                    _ = term.recv() => {}
+                }
+            } else {
+                ctrl_c.await.ok();
             }
         }
+        #[cfg(not(unix))]
+        {
+            ctrl_c.await.ok();
+        }
+    };
+
+    tokio::select! {
+        _ = shutdown => {
+            tracing::info!("Shutdown signal received, stopping listener");
+        }
+        _ = async {
+            while let Some(accept_result) = listener.next().await {
+                match accept_result {
+                    Ok(transport) => {
+                        let server = server.clone();
+                        tokio::spawn(async move {
+                            let channel = BaseChannel::with_defaults(transport);
+                            channel
+                                .execute(server.serve())
+                                .for_each(|response| async move {
+                                    tokio::spawn(response);
+                                })
+                                .await;
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!("Error accepting connection: {}", e);
+                    }
+                }
+            }
+        } => {
+            tracing::info!("Listener closed");
+        }
+    }
+
+    // Clean up socket file on exit.
+    if socket_path.exists() {
+        let _ = std::fs::remove_file(socket_path);
+        tracing::info!("Removed socket file");
     }
 
     Ok(())
