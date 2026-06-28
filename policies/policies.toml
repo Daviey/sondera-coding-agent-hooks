@@ -83,7 +83,10 @@ name = "Broken Access Control"
 definition = """\
 CWE-284, CWE-862 (OWASP A01:2021). API endpoints or functions that perform \
 create/update/delete without authentication or authorization checks. \
-Using user-supplied resource IDs without verifying ownership or permissions."""
+Using user-supplied resource IDs without verifying ownership or permissions. \
+Exposing sensitive data (credit card numbers, CVVs, full card magnetics) \
+in queries or API responses. Overly permissive database grants \
+(GRANT ALL TO public). Running debug mode on public interfaces."""
 
 [[policies.categories]]
 code = "SC8"
@@ -509,5 +512,25 @@ category = "SC8"
 
 [[policies.examples]]
 content = "docker run -d --name app -p 8080:8080 myapp:latest"
+violation = false
+category = "SC0"
+
+[[policies.examples]]
+content = "psql -c \"SELECT * FROM credit_cards WHERE cvv = '123'\""
+violation = true
+category = "SC7"
+
+[[policies.examples]]
+content = "xmlInput = f\"<user><name>{user_input}</name></user>\"\ntree = ET.fromstring(xmlInput)"
+violation = true
+category = "SC2"
+
+[[policies.examples]]
+content = "# Never store passwords in plaintext\npassword = hashlib.sha256(pw).hexdigest()\n# NOTE: above is documentation example, use bcrypt in production"
+violation = false
+category = "SC0"
+
+[[policies.examples]]
+content = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: app-config\ndata:\n  config.yaml: YXBwOgogIHBvcnQ6IDgwODA="
 violation = false
 category = "SC0"
