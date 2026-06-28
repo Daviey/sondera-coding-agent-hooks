@@ -6,7 +6,7 @@ Grounded in `crates/guardrails/signature/`, `crates/guardrails/ifc/src/label.rs`
 
 ## How they combine
 
-For each **Action** event (pre-execution: the shell command, file write, or web fetch about to run) the harness scans the content with all three subsystems and packs the results into the Cedar request context. **Observation** events (post-execution: command output, file contents, prompt text) run the YARA scan and Cedar only, skipping the LLM classifiers for latency — unless a YARA signature match on the content meets the `SONDERA_LLM_YARA_SEVERITY` threshold (default: any match), which overrides the skip and runs the LLM classifiers. The set of Action types that get the LLM can also be narrowed with `SONDERA_LLM_EVENT_TYPES`. For the full decision tree, caching, circuit breaker, and fail-mode behaviour, see [`llm-engagement.md`](llm-engagement.md).
+For each **Action** event (pre-execution: the shell command, file write, or web fetch about to run) the harness scans the content with all three subsystems and packs the results into the Cedar request context. **Observation** events (post-execution: command output, file contents, prompt text) run the YARA scan and Cedar only, skipping the LLM classifiers for latency, unless a YARA signature match on the content meets the `SONDERA_LLM_YARA_SEVERITY` threshold (default: any match), which overrides the skip and runs the LLM classifiers. The set of Action types that get the LLM can also be narrowed with `SONDERA_LLM_EVENT_TYPES`. For the full decision tree, caching, circuit breaker, and fail-mode behaviour, see [`llm-engagement.md`](llm-engagement.md).
 
 | Field | Source | Type |
 |---|---|---|

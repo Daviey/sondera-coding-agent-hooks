@@ -74,7 +74,7 @@ Valid type names: `ShellCommand`, `WebFetch`, `FileRead`, `FileWrite`, `FileEdit
 | `critical` | Critical only |
 | `off` / `none` / `0` | Disable the YARA trigger (never override the filter) |
 
-This is how secrets or injection patterns in command **output** (an Observation that would normally skip the LLM) still reach the IFC classifier — YARA detects the pattern, and the threshold override forces the LLM to classify it.
+This is how secrets or injection patterns in command **output** (an Observation that would normally skip the LLM) still reach the IFC classifier: YARA detects the pattern, and the threshold override forces the LLM to classify it.
 
 ## Per-classifier model
 
