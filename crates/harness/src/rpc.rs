@@ -4,11 +4,14 @@
 //! enabling IPC between client applications and the harness server.
 
 use crate::harness::Harness;
-use crate::types::{Adjudicated, Event};
+use crate::types::{Adjudicated, Decision, Event};
 use anyhow::Result;
 use futures::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use tarpc::server::{BaseChannel, Channel};
 use tarpc::{client, context};
 use tokio_serde::formats::Json;
@@ -29,6 +32,47 @@ pub fn default_socket_path() -> std::path::PathBuf {
         .join("sondera-harness.sock")
 }
 
+/// Snapshot of server-side counters, returned by the `stats` RPC method.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerStats {
+    pub uptime_secs: u64,
+    pub events_total: u64,
+    pub allows: u64,
+    pub denies: u64,
+    pub errors: u64,
+}
+
+/// Internal shared counters for the server wrapper.
+struct Counters {
+    start: Instant,
+    events_total: AtomicU64,
+    allows: AtomicU64,
+    denies: AtomicU64,
+    errors: AtomicU64,
+}
+
+impl Counters {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            events_total: AtomicU64::new(0),
+            allows: AtomicU64::new(0),
+            denies: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+        }
+    }
+
+    fn snapshot(&self) -> ServerStats {
+        ServerStats {
+            uptime_secs: self.start.elapsed().as_secs(),
+            events_total: self.events_total.load(Ordering::Relaxed),
+            allows: self.allows.load(Ordering::Relaxed),
+            denies: self.denies.load(Ordering::Relaxed),
+            errors: self.errors.load(Ordering::Relaxed),
+        }
+    }
+}
+
 /// tarpc service definition for the Sondera harness.
 #[tarpc::service]
 pub trait HarnessService {
@@ -37,37 +81,63 @@ pub trait HarnessService {
 
     /// Health check endpoint.
     async fn health() -> bool;
+
+    /// Server statistics (event counts, uptime, allow/deny breakdown).
+    async fn stats() -> ServerStats;
 }
 
 /// Server implementation of the HarnessService.
 pub struct HarnessServer<H> {
     harness: Arc<H>,
+    counters: Arc<Counters>,
 }
 
 impl<H> Clone for HarnessServer<H> {
     fn clone(&self) -> Self {
         Self {
             harness: Arc::clone(&self.harness),
+            counters: Arc::clone(&self.counters),
         }
     }
 }
 
 impl<H: Harness + 'static> HarnessServer<H> {
     pub fn new(harness: Arc<H>) -> Self {
-        Self { harness }
+        Self {
+            harness,
+            counters: Arc::new(Counters::new()),
+        }
     }
 }
 
 impl<H: Harness + 'static> HarnessService for HarnessServer<H> {
     async fn adjudicate(self, _: context::Context, event: Event) -> Result<Adjudicated, String> {
-        self.harness
-            .adjudicate(event)
-            .await
-            .map_err(|e| e.to_string())
+        self.counters.events_total.fetch_add(1, Ordering::Relaxed);
+        match self.harness.adjudicate(event).await {
+            Ok(result) => {
+                match result.decision {
+                    Decision::Allow | Decision::Escalate => {
+                        self.counters.allows.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Decision::Deny => {
+                        self.counters.denies.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Ok(result)
+            }
+            Err(e) => {
+                self.counters.errors.fetch_add(1, Ordering::Relaxed);
+                Err(e.to_string())
+            }
+        }
     }
 
     async fn health(self, _: context::Context) -> bool {
         true
+    }
+
+    async fn stats(self, _: context::Context) -> ServerStats {
+        self.counters.snapshot()
     }
 }
 
@@ -183,6 +253,14 @@ impl HarnessClient {
             .await
             .map_err(|e| anyhow::anyhow!("RPC error: {}", e))
     }
+
+    /// Server statistics.
+    pub async fn stats(&self) -> Result<ServerStats> {
+        self.inner
+            .stats(context::current())
+            .await
+            .map_err(|e| anyhow::anyhow!("RPC error: {}", e))
+    }
 }
 
 impl Harness for HarnessClient {
@@ -248,6 +326,12 @@ mod tests {
         );
         let result = client.adjudicate(event).await.unwrap();
         assert_eq!(result.decision, Decision::Allow);
+
+        // Test stats: one event processed, one allow.
+        let stats = client.stats().await.unwrap();
+        assert_eq!(stats.events_total, 1);
+        assert_eq!(stats.allows, 1);
+        assert_eq!(stats.denies, 0);
 
         // Cleanup.
         server_handle.abort();

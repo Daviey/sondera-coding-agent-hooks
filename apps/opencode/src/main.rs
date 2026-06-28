@@ -284,6 +284,13 @@ async fn health_check() -> Result<()> {
     }
 }
 
+async fn stats_check() -> Result<()> {
+    let client = connect_harness().await?;
+    let stats = client.stats().await?;
+    println!("{}", serde_json::to_string_pretty(&stats)?);
+    Ok(())
+}
+
 fn print_usage() {
     eprintln!(
         "sondera-opencode-adapter {version}
@@ -292,6 +299,7 @@ Usage: sondera-opencode-adapter <command>
 
 Commands:
   health       Check if the harness server is reachable
+  stats        Print server statistics (event counts, uptime, allow/deny)
   adjudicate   Read one JSON event from stdin, return adjudication on stdout
   stream       Read NDJSON events from stdin, return NDJSON adjudications
 
@@ -315,6 +323,9 @@ async fn main() -> Result<()> {
     match args.get(1).map(|s| s.as_str()) {
         Some("health") => {
             health_check().await?;
+        }
+        Some("stats") => {
+            stats_check().await?;
         }
         Some("stream") => {
             stream_mode().await?;
