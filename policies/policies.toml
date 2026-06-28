@@ -140,6 +140,21 @@ violation = false
 category = "SC0"
 
 [[policies.examples]]
+content = "#!/bin/bash\nrm -rf /var/lib/data\ngit reset --hard HEAD~50\ngit push --force origin main"
+violation = true
+category = "SC1"
+
+[[policies.examples]]
+content = "import subprocess, os\nuser = request.GET.get('cmd')\nsubprocess.call(f'ls {user}', shell=True)"
+violation = true
+category = "SC2"
+
+[[policies.examples]]
+content = "#!/bin/bash\nset -euo pipefail\nBUILD_DIR=${1:-./build}\nrm -rf \"$BUILD_DIR\"\ncargo build --release\ncp target/release/app \"$BUILD_DIR/\""
+violation = false
+category = "SC0"
+
+[[policies.examples]]
 content = "cursor.execute(\"SELECT * FROM users WHERE id = %s\", (user_id,))"
 violation = false
 category = "SC0"
