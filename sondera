@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── sondera launcher ──────────────────────────────────────────────────────
+#
+# Starts the harness server and launches a coding agent (claude or opencode)
+# with sondera guardrails active. Works from any directory.
+#
+# Usage:
+#   sondera start [-d]     Start the harness server (-d = background)
+#   sondera stop           Stop the harness server
+#   sondera status         Server health + stats
+#   sondera install <a>    Install hooks for claude or opencode
+#   sondera claude [args]  Ensure server running, launch claude
+#   sondera opencode [a]   Ensure server running, launch opencode
+#   sondera bench [args]   Run benchmark
+#
+# Install:  ln -s /path/to/godera/sondera ~/.local/bin/sondera
+#           (or just run it directly)
+#
+# Config:   ~/.sondera/env  (provider, model, credentials — NOT committed)
+
+# ── resolve repo path ────────────────────────────────────────────────────
+
+# Resolve symlinks to find the real script location
+SELF="${BASH_SOURCE[0]}"
+while [[ -L "$SELF" ]]; do
+  DIR="$(cd "$(dirname "$SELF")" && pwd)"
+  SELF="$(readlink "$SELF")"
+  [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+
+# The repo root contains Cargo.toml + policies/
+SONDERA="${SONDERA_HOME:-$SCRIPT_DIR}"
+[[ -f "$SONDERA/Cargo.toml" && -d "$SONDERA/policies" ]] \
+  || die "cannot find sondera repo at $SONDERA — set SONDERA_HOME"
+
+POLICIES="$SONDERA/policies"
+BIN="$SONDERA/target/release"
+[[ -d "$BIN" ]] || BIN="$SONDERA/target/debug"
+
+SOCKET="${SONDERA_SOCKET:-$HOME/.sondera/sondera-harness.sock}"
+ENV_FILE="$HOME/.sondera/env"
+PID_FILE="$HOME/.sondera/sondera.pid"
+LOG_FILE="$HOME/.sondera/sondera.log"
+
+mkdir -p "$HOME/.sondera"
+
+# ── helpers ──────────────────────────────────────────────────────────────
+
+log()  { echo "[sondera] $*" >&2; }
+die()  { log "error: $*"; exit 1; }
+
+server_pid() {
+  [[ -f "$PID_FILE" ]] || return 1
+  local pid; pid=$(cat "$PID_FILE" 2>/dev/null) || return 1
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null && echo "$pid" || return 1
+}
+
+server_running() { [[ -S "$SOCKET" ]] && server_pid >/dev/null; }
+
+health_check() {
+  [[ -S "$SOCKET" ]] || return 1
+  SONDERA_SOCKET="$SOCKET" "$BIN/sondera-opencode-adapter" health >/dev/null 2>&1
+}
+
+ensure_env() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    log "creating config template at $ENV_FILE"
+    log "edit it with your credentials, then re-run."
+    cat > "$ENV_FILE" <<'TMPL'
+# ── sondera harness configuration ──────────────────────────────────────
+# This file is NOT committed to git. Edit with your own credentials.
+# See docs/configuration.md for all options.
+
+# Option A: Vertex AI deployed endpoint (best accuracy)
+SONDERA_PROVIDER=vertex
+SONDERA_MODEL=<publisher>/<model>     # e.g. openai/gpt-oss-safeguard-20b
+SONDERA_REASONING_CONTROL={"reasoning_effort":"low"}
+VERTEX_PROJECT=<your-gcp-project>
+VERTEX_LOCATION=<your-region>          # e.g. europe-west2
+VERTEX_ENDPOINT_ID=<your-endpoint-id>
+VERTEX_PROJECT_NUMBER=<your-project-number>
+
+# Option B: z.ai (fastest, cheapest)
+# SONDERA_PROVIDER=zai
+# SONDERA_MODEL=glm-4.5-flash
+# SONDERA_REASONING_CONTROL={"thinking":{"type":"disabled"}}
+# ZAI_API_KEY=<your-key>
+
+# Option C: Anthropic
+# SONDERA_PROVIDER=anthropic
+# SONDERA_MODEL=claude-haiku-4-5
+# ANTHROPIC_API_KEY=<your-key>
+TMPL
+    chmod 600 "$ENV_FILE"
+    return 1
+  fi
+  return 0
+}
+
+ensure_binaries() {
+  for bin in sondera-harness-server sondera-opencode-adapter sondera-claude; do
+    [[ -x "$BIN/$bin" ]] || die "binary not found: $BIN/$bin\nrun: cd $SONDERA && cargo build"
+  done
+}
+
+start_server() {
+  ensure_env || exit 1
+  ensure_binaries
+
+  if server_running; then
+    log "server already running (pid $(server_pid))"
+    return 0
+  fi
+
+  [[ -S "$SOCKET" ]] && rm -f "$SOCKET"
+
+  # Load env config
+  set -a; source "$ENV_FILE"; set +a
+
+  if [[ "${1:-}" == "-d" ]]; then
+    log "starting harness server..."
+    nohup "$BIN/sondera-harness-server" --policy-path "$POLICIES" -v \
+      > "$LOG_FILE" 2>&1 &
+    local pid=$!
+    echo "$pid" > "$PID_FILE"
+
+    for i in $(seq 1 50); do
+      [[ -S "$SOCKET" ]] && break
+      sleep 0.2
+    done
+
+    if health_check; then
+      log "server started (pid $pid)"
+    else
+      log "server failed — check $LOG_FILE"
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+  else
+    exec "$BIN/sondera-harness-server" --policy-path "$POLICIES" -v
+  fi
+}
+
+stop_server() {
+  local pid; pid=$(server_pid) || { log "not running"; return 0; }
+  log "stopping (pid $pid)..."
+  kill -TERM "$pid" 2>/dev/null || true
+  for i in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  log "stopped"
+}
+
+show_status() {
+  if server_running; then
+    log "server: running (pid $(server_pid))"
+    log "socket: $SOCKET"
+    health_check && { log "health: ok"; SONDERA_SOCKET="$SOCKET" "$BIN/sondera-opencode-adapter" stats 2>/dev/null || true; }
+  else
+    log "server: not running"
+  fi
+}
+
+install_claude() {
+  ensure_binaries
+  log "installing claude hooks..."
+  "$BIN/sondera-claude" install --scope user
+  log "done. Run 'sondera start -d' before launching claude."
+}
+
+install_opencode() {
+  ensure_binaries
+  local cfg="$HOME/.config/opencode/opencode.json"
+  local plugin="file://$SONDERA/plugins/opencode/src/index.ts"
+  mkdir -p "$(dirname "$cfg")"
+
+  [[ -f "$cfg" ]] || echo '{"$schema":"https://opencode.ai/config.json","plugin":[]}' > "$cfg"
+
+  if grep -q "sondera" "$cfg" 2>/dev/null; then
+    log "opencode sondera plugin already configured"
+  else
+    local tmp; tmp=$(mktemp)
+    jq --arg p "$plugin" '.plugin = ((.plugin // []) + [$p])' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+    log "added sondera plugin to $cfg"
+  fi
+  log "run 'sondera start -d' before launching opencode."
+}
+
+# ── main ─────────────────────────────────────────────────────────────────
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  start)    start_server "${1:-}" ;;
+  stop)     stop_server ;;
+  restart)  stop_server; start_server -d ;;
+  status)   show_status ;;
+  install)  case "${1:-}" in
+              claude)   install_claude ;;
+              opencode) install_opencode ;;
+              *) die "usage: sondera install <claude|opencode>" ;;
+            esac ;;
+  claude)   health_check || start_server -d; exec claude "$@" ;;
+  opencode) health_check || start_server -d; exec opencode "$@" ;;
+  bench)    ensure_env || exit 1; exec "$BIN/sondera-benchmark" \
+              --corpus "$SONDERA/benchmarks/corpus.jsonl" --policies "$POLICIES" "$@" ;;
+  help|--help|-h)
+    cat <<'USAGE'
+sondera — coding agent guardrail launcher
+
+  start [-d]       Start harness server (-d = background)
+  stop             Stop harness server
+  restart          Restart harness server
+  status           Show server health and stats
+  install <agent>  Install hooks (claude or opencode)
+  claude [args]    Launch claude with guardrails
+  opencode [args]  Launch opencode with guardrails
+  bench [args]     Run benchmark
+  help             This message
+
+Config: ~/.sondera/env (NOT committed — your credentials)
+USAGE
+    ;;
+  *) die "unknown command: $cmd (try 'sondera help')" ;;
+esac
