@@ -270,6 +270,15 @@ impl DataModel {
         &self.labels
     }
 
+    /// Get the underlying LLM client, if configured.
+    ///
+    /// Exposed so callers (e.g. the cedar harness) can issue additional structured-output calls
+    /// against the same backend without reconstructing a client — for example a combined
+    /// sensitivity + policy verdict in a single round trip.
+    pub fn llm_client(&self) -> Option<&sondera_llm::LlmClient> {
+        self.client.as_ref()
+    }
+
     /// Get the current model name.
     pub fn model(&self) -> &str {
         &self.config.llm.model

@@ -199,11 +199,9 @@ impl CedarPolicyHarness {
                 let severity: i64 = sig.severity.into();
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
-                // Classify sensitivity and evaluate policy concurrently.
-                let (label, policy_classification) = tokio::try_join!(
-                    self.classify_label(&scannable, skip_llm, source_agent),
-                    self.evaluate_policy(&scannable, skip_llm, source_agent),
-                )?;
+                // Classify sensitivity and evaluate policy (combined single call when enabled).
+                let (label, policy_classification) =
+                    self.classify_and_evaluate(&scannable, skip_llm, source_agent).await?;
                 let label_id = euid("Label", &label.to_string())?;
 
                 let context_value = serde_json::json!({
@@ -231,11 +229,9 @@ impl CedarPolicyHarness {
                 let severity: i64 = sig.severity.into();
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
-                // Classify sensitivity and evaluate policy concurrently.
-                let (label, policy_classification) = tokio::try_join!(
-                    self.classify_label(&content, skip_llm, source_agent),
-                    self.evaluate_policy(&content, skip_llm, source_agent),
-                )?;
+                // Classify sensitivity and evaluate policy (combined single call when enabled).
+                let (label, policy_classification) =
+                    self.classify_and_evaluate(&content, skip_llm, source_agent).await?;
                 let label_id = euid("Label", &label.to_string())?;
 
                 let context_value = serde_json::json!({
@@ -273,11 +269,9 @@ impl CedarPolicyHarness {
                 let severity: i64 = sig.severity.into();
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
-                // Classify sensitivity and evaluate policy concurrently.
-                let (label, policy_classification) = tokio::try_join!(
-                    self.classify_label(&scannable, skip_llm, source_agent),
-                    self.evaluate_policy(&scannable, skip_llm, source_agent),
-                )?;
+                // Classify sensitivity and evaluate policy (combined single call when enabled).
+                let (label, policy_classification) =
+                    self.classify_and_evaluate(&scannable, skip_llm, source_agent).await?;
                 let label_id = euid("Label", &label.to_string())?;
 
                 // Create/update File entity with label.
@@ -316,10 +310,8 @@ impl CedarPolicyHarness {
                 let severity: i64 = sig.severity.into();
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
-                let (label, policy_classification) = tokio::try_join!(
-                    self.classify_label(&content, skip_llm, source_agent),
-                    self.evaluate_policy(&content, skip_llm, source_agent),
-                )?;
+                let (label, policy_classification) =
+                    self.classify_and_evaluate(&content, skip_llm, source_agent).await?;
                 let label_id = euid("Label", &label.to_string())?;
                 mark_trajectory_label(label)?;
 
@@ -354,10 +346,8 @@ impl CedarPolicyHarness {
                 let severity: i64 = sig.severity.into();
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
-                let (label, policy_classification) = tokio::try_join!(
-                    self.classify_label(&wfo.result, skip_llm, source_agent),
-                    self.evaluate_policy(&wfo.result, skip_llm, source_agent),
-                )?;
+                let (label, policy_classification) =
+                    self.classify_and_evaluate(&wfo.result, skip_llm, source_agent).await?;
                 let label_id = euid("Label", &label.to_string())?;
                 mark_trajectory_label(label)?;
 
@@ -395,10 +385,8 @@ impl CedarPolicyHarness {
                 let severity: i64 = sig.severity.into();
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
-                let (label, policy_classification) = tokio::try_join!(
-                    self.classify_label(content, skip_llm, source_agent),
-                    self.evaluate_policy(content, skip_llm, source_agent),
-                )?;
+                let (label, policy_classification) =
+                    self.classify_and_evaluate(content, skip_llm, source_agent).await?;
                 let label_id = euid("Label", &label.to_string())?;
 
                 // Taint trajectory with file content label.
@@ -445,10 +433,8 @@ impl CedarPolicyHarness {
                 let severity: i64 = sig.severity.into();
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
-                let (label, policy_classification) = tokio::try_join!(
-                    self.classify_label(&content, skip_llm, source_agent),
-                    self.evaluate_policy(&content, skip_llm, source_agent),
-                )?;
+                let (label, policy_classification) =
+                    self.classify_and_evaluate(&content, skip_llm, source_agent).await?;
                 let label_id = euid("Label", &label.to_string())?;
                 mark_trajectory_label(label)?;
 

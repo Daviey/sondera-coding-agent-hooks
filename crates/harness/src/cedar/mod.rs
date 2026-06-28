@@ -1,5 +1,6 @@
 pub mod entity;
 mod transform;
+mod combined;
 
 use crate::cedar::entity::Trajectory;
 use crate::harness::Harness;
@@ -189,6 +190,47 @@ fn llm_event_type_name(event: &TrajectoryEvent) -> Option<&'static str> {
 /// means any YARA match at or above `Low` severity overrides `skip_llm`.
 type YaraTrigger = Option<Severity>;
 
+/// Whether the YARA trigger also gates Action events (which by default always run the LLM).
+///
+/// When `false` (default, historical behaviour), Action events in [`LlmEventFilter`] always get
+/// LLM classification and the YARA trigger only rescues excluded event types.
+///
+/// When `true`, the YARA trigger becomes a necessary condition for *every* event: an Action event
+/// with primary-content severity below the trigger threshold skips the LLM. Set via
+/// `SONDERA_LLM_YARA_GATE_ACTIONS=1`. Pairs well with `SONDERA_LLM_YARA_SEVERITY=low` to skip
+/// LLM cost/latency on benign actions while still classifying anything YARA flags.
+struct YaraGateActions(bool);
+
+impl YaraGateActions {
+    fn from_env() -> Self {
+        Self::parse(&std::env::var("SONDERA_LLM_YARA_GATE_ACTIONS").unwrap_or_default())
+    }
+
+    fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "0" | "false" | "off" | "no" => Self(false),
+            _ => Self(true),
+        }
+    }
+}
+
+/// Whether to issue a single LLM call covering both sensitivity and policy verdicts
+/// (`SONDERA_LLM_COMBINED=1`). See [`combined`] for the tradeoffs.
+struct CombinedMode(bool);
+
+impl CombinedMode {
+    fn from_env() -> Self {
+        Self::parse(&std::env::var("SONDERA_LLM_COMBINED").unwrap_or_default())
+    }
+
+    fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "0" | "false" | "off" | "no" => Self(false),
+            _ => Self(true),
+        }
+    }
+}
+
 /// Parse the YARA trigger threshold from a string. Accepts severity names (`low`, `medium`,
 /// `high`, `critical`) or `off` / `none` / `0` to disable. Defaults to `Low` when unset or
 /// unrecognized.
@@ -253,6 +295,8 @@ pub struct CedarPolicyHarness {
     fail_mode: FailMode,
     llm_event_types: LlmEventFilter,
     yara_trigger: YaraTrigger,
+    yara_gate_actions: YaraGateActions,
+    combined_mode: CombinedMode,
 }
 
 impl CedarPolicyHarness {
@@ -413,6 +457,8 @@ impl CedarPolicyHarness {
             fail_mode: FailMode::from_env(),
             llm_event_types: LlmEventFilter::from_env(),
             yara_trigger: yara_trigger_from_env(),
+            yara_gate_actions: YaraGateActions::from_env(),
+            combined_mode: CombinedMode::from_env(),
         })
     }
 
@@ -521,6 +567,32 @@ impl CedarPolicyHarness {
             .is_authorized(request, &self.policy_set, &entities))
     }
 
+    /// Run both sensitivity and policy classification for the same content.
+    ///
+    /// Tries the single-LLM-call combined path first (see [`combined`]); if it returns `None`
+    /// (combined mode disabled, multiple templates, no client, or transient failure) falls back
+    /// to the historical parallel `try_join!` of [`classify_label`] + [`evaluate_policy`].
+    ///
+    /// [`classify_label`]: Self::classify_label
+    /// [`evaluate_policy`]: Self::evaluate_policy
+    async fn classify_and_evaluate(
+        &self,
+        content: &str,
+        skip_llm: bool,
+        source_agent: &str,
+    ) -> Result<(Label, PolicyClassification)> {
+        if let Some((sensitivity, policy_classification)) =
+            self.classify_combined(content, skip_llm, source_agent).await?
+        {
+            return Ok((sensitivity.max_label(), policy_classification));
+        }
+        let (label, policy_classification) = tokio::try_join!(
+            self.classify_label(content, skip_llm, source_agent),
+            self.evaluate_policy(content, skip_llm, source_agent),
+        )?;
+        Ok((label, policy_classification))
+    }
+
     pub fn validate_request(
         &self,
         principal: EntityUid,
@@ -591,14 +663,22 @@ impl Harness for CedarPolicyHarness {
             return Ok(Adjudicated::allow());
         }
 
-        // Determine whether this event type gets LLM classification by default.
-        // Controlled by SONDERA_LLM_EVENT_TYPES (default: all Action events).
-        // The YARA trigger (SONDERA_LLM_YARA_SEVERITY) can override this: if a signature
-        // match on the event's primary content meets the threshold, the LLM runs regardless.
-        let skip_llm = !self.llm_event_types.includes(&event.event);
-        let skip_llm = skip_llm && {
-            let sig = sondera_signature::scan(&primary_content(&event));
-            !self.yara_triggers(sig.severity)
+        // Determine whether this event type gets LLM classification.
+        //
+        // Two modes, both consulting the YARA trigger (`SONDERA_LLM_YARA_SEVERITY`):
+        // - Default: LLM runs if the event type is in the filter (default: all Actions)
+        //   OR a YARA signature meets the threshold. The YARA trigger only rescues
+        //   otherwise-excluded event types.
+        // - YARA-gated (`SONDERA_LLM_YARA_GATE_ACTIONS=1`): LLM runs only if BOTH the
+        //   event type is in the filter AND a YARA signature meets the threshold.
+        //   Use to skip LLM cost/latency on benign Action events.
+        let included = self.llm_event_types.includes(&event.event);
+        let sig = sondera_signature::scan(&primary_content(&event));
+        let meets_threshold = self.yara_triggers(sig.severity);
+        let skip_llm = if self.yara_gate_actions.0 {
+            !(included && meets_threshold)
+        } else {
+            !(included || meets_threshold)
         };
 
         let source_agent = &event.agent.provider_id;
@@ -830,5 +910,17 @@ mod llm_filter_tests {
         assert!(Severity::Medium >= trigger.unwrap());
         assert!(Severity::High >= trigger.unwrap());
         assert!(Severity::Critical >= trigger.unwrap());
+    }
+
+    #[test]
+    fn yara_gate_actions_env_parsing() {
+        let off_values = ["", "0", "false", "off", "no"];
+        for v in off_values {
+            assert!(!YaraGateActions::parse(v).0, "value {v:?} should be off");
+        }
+        let on_values = ["1", "true", "on", "yes", "enabled"];
+        for v in on_values {
+            assert!(YaraGateActions::parse(v).0, "value {v:?} should be on");
+        }
     }
 }

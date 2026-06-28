@@ -39,7 +39,7 @@ export class HarnessClient {
   private forceOneshot: boolean
   private timeoutMs: number
 
-  constructor(binaryPath?: string, forceOneshot = false, timeoutMs = 5000) {
+  constructor(binaryPath?: string, forceOneshot = false, timeoutMs = 30000) {
     this.forceOneshot = forceOneshot
     this.timeoutMs = timeoutMs
     const envPath = process.env.SONDERA_ADAPTER_PATH
