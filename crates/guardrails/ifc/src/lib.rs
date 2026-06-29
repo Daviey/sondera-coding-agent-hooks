@@ -324,7 +324,7 @@ impl DataModel {
             )
         })?;
 
-        let system_prompt = label.render();
+        let system_prompt = label.render_rag(content, 5);
         let user_prompt = label.render_user_message(content);
 
         let result = client

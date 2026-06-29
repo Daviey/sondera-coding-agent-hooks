@@ -7,6 +7,7 @@
 use crate::DataClassificationError;
 use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
 use strum_macros::{Display, EnumString};
@@ -218,6 +219,61 @@ impl LabelTemplate {
 
     /// Render this label template into a system prompt following the Harmony format
     /// with sensitivity categories and structured output.
+    /// Render the system prompt with only the K examples most similar to `content` (RAG).
+    /// Falls back to `render()` (all examples) when content is empty or k >= examples.len().
+    pub fn render_rag(&self, content: &str, k: usize) -> String {
+        let mut prompt = format!("# {}\n", self.name);
+
+        if !self.description.is_empty() {
+            prompt.push('\n');
+            prompt.push_str(&self.description);
+            prompt.push('\n');
+        }
+
+        prompt.push_str("\n## INSTRUCTIONS\n");
+        if self.instructions.is_empty() {
+            prompt.push_str(
+                "Evaluate the following content for data sensitivity.\n\
+                 If the content is sensitive, return:\n\
+                 {\"sensitive\": 1, \"sensitivity_category\": \"<label>\"}\n\
+                 If the content is public/non-sensitive, return:\n\
+                 {\"sensitive\": 0, \"sensitivity_category\": \"public\"}\n",
+            );
+        } else {
+            prompt.push_str(&self.instructions);
+            prompt.push('\n');
+        }
+
+        if !self.categories.is_empty() {
+            prompt.push_str("\n## CATEGORIES\n");
+            for cat in &self.categories {
+                prompt.push_str(&format!(
+                    "- {} ({}): {}\n",
+                    cat.label.serde_name(),
+                    cat.label.display_name(),
+                    cat.definition
+                ));
+            }
+        }
+
+        // RAG: select the K most relevant examples by token overlap with the input content.
+        let selected = select_top_k(content, &self.examples, k);
+        if !selected.is_empty() {
+            prompt.push_str("\n## EXAMPLES\n");
+            for ex in selected {
+                prompt.push_str(&format!(
+                    "Content: {}\nAnswer: {{\"sensitive\": {}, \"sensitivity_category\": \"{}\"}}\n\n",
+                    ex.content,
+                    if ex.sensitive { 1 } else { 0 },
+                    ex.label.serde_name()
+                ));
+            }
+        }
+
+        prompt
+    }
+
+    /// Render the system prompt with ALL examples.
     pub fn render(&self) -> String {
         let mut prompt = format!("# {}\n", self.name);
 
@@ -548,4 +604,36 @@ label = "highly_confidential"
         let display = format!("{}", classification);
         assert!(display.contains("SENSITIVE"));
     }
+}
+
+/// Select the K examples most similar to `content` by token overlap (Jaccard similarity).
+/// Returns all examples if k >= examples.len(). Returns empty for empty content.
+pub(crate) fn select_top_k<'a>(
+    content: &str,
+    examples: &'a [LabelExample],
+    k: usize,
+) -> Vec<&'a LabelExample> {
+    if examples.is_empty() || k == 0 { return Vec::new(); }
+    if k >= examples.len() || content.is_empty() { return examples.iter().collect(); }
+
+    let content_tokens: HashSet<String> = content
+        .split(|c: char| c.is_whitespace() || matches!(c, '"'|'\''|'('|')'|'='|':'))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    let mut scored: Vec<(usize, usize, &LabelExample)> = examples.iter().enumerate()
+        .map(|(i, ex)| {
+            let ex_tokens: HashSet<String> = ex.content
+                .split(|c: char| c.is_whitespace() || matches!(c, '"'|'\''|'('|')'|'='|':'))
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_lowercase())
+                .collect();
+            let overlap = content_tokens.intersection(&ex_tokens).count();
+            (overlap, i, ex)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().take(k).map(|(_, _, ex)| ex).collect()
 }

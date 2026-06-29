@@ -163,6 +163,40 @@ impl PolicyTemplate {
 
     /// Render this template into a system prompt following the Harmony format
     /// with severity categories and policy-referencing structured output.
+    /// Render with only the K most relevant examples (RAG) — smaller prompt, faster LLM.
+    pub fn render_rag(&self, content: &str, k: usize) -> String {
+        let mut prompt = format!("# {}\n", self.name);
+        if !self.description.is_empty() { prompt.push('\n'); prompt.push_str(&self.description); prompt.push('\n'); }
+        prompt.push_str("\n## INSTRUCTIONS\n");
+        if self.instructions.is_empty() {
+            prompt.push_str(&format!(
+                "Evaluate the following content against this policy.\n\
+                 If the content violates this policy, return:\n\
+                 {{\"violation\": 1, \"policy_category\": \"<category_code>\"}}\n\
+                 If the content is compliant, return:\n\
+                 {{\"violation\": 0, \"policy_category\": \"{safe}\"}}\n",
+                safe = self.safe_category()
+            ));
+        } else { prompt.push_str(&self.instructions); prompt.push('\n'); }
+        if !self.categories.is_empty() {
+            prompt.push_str("\n## CATEGORIES\n");
+            for cat in &self.categories {
+                prompt.push_str(&format!("- {} ({}): {}\n", cat.code, cat.name, cat.definition));
+            }
+        }
+        let selected = select_top_k(content, &self.examples, k);
+        if !selected.is_empty() {
+            prompt.push_str("\n## EXAMPLES\n");
+            for ex in selected {
+                prompt.push_str(&format!(
+                    "Content: {}\nAnswer: {{\"violation\": {}, \"policy_category\": \"{}\"}}\n\n",
+                    ex.content, if ex.violation { 1 } else { 0 }, ex.category
+                ));
+            }
+        }
+        prompt
+    }
+
     pub fn render(&self) -> String {
         let mut prompt = format!("# {}\n", self.name);
 
@@ -282,4 +316,34 @@ impl fmt::Display for PolicyClassification {
             self.violations.len(),
         )
     }
+}
+
+/// Select the K examples most similar to `content` by token overlap.
+pub(crate) fn select_top_k<'a>(
+    content: &str,
+    examples: &'a [PolicyExample],
+    k: usize,
+) -> Vec<&'a PolicyExample> {
+    if examples.is_empty() || k == 0 { return Vec::new(); }
+    if k >= examples.len() || content.is_empty() { return examples.iter().collect(); }
+
+    let content_tokens: HashSet<String> = content
+        .split(|c: char| c.is_whitespace() || matches!(c, '"'|'\''|'('|')'|'='|':'))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    let mut scored: Vec<(usize, usize, &PolicyExample)> = examples.iter().enumerate()
+        .map(|(i, ex)| {
+            let ex_tokens: HashSet<String> = ex.content
+                .split(|c: char| c.is_whitespace() || matches!(c, '"'|'\''|'('|')'|'='|':'))
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_lowercase())
+                .collect();
+            (content_tokens.intersection(&ex_tokens).count(), i, ex)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().take(k).map(|(_, _, ex)| ex).collect()
 }

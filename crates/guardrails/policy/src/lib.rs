@@ -414,7 +414,7 @@ impl PolicyModel {
             )
         })?;
 
-        let system_prompt = policy.render();
+        let system_prompt = policy.render_rag(content, 5);
         let user_prompt = policy.render_user_message(content);
 
         let result = client
